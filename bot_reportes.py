@@ -3,7 +3,6 @@ import sys
 import json
 import logging
 import threading
-import time
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
@@ -20,8 +19,8 @@ import docx
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
-import gspread
-from google.oauth2.service_account import Credentials
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -46,49 +45,42 @@ def iniciar_servidor_web():
     servidor = HTTPServer(("0.0.0.0", puerto), HealthHandler)
     servidor.serve_forever()
 
-# --- CACHÉ LOCAL RÁPIDO DE HISTORIAL (RESPUESTA INSTANTÁNEA) ---
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+# BASE LOCAL DE CLIENTES PARA BÚSQUEDA INSTANTÁNEA (SIN DEMORA DE RED)
 CACHE_FILE = "clientes_cache.json"
 MEMORIA_CLIENTES = []
 
-def cargar_cache_desde_disco():
+def cargar_cache():
     global MEMORIA_CLIENTES
     if os.path.exists(CACHE_FILE):
         try:
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
                 MEMORIA_CLIENTES = json.load(f)
-                logger.info(f"Caché local cargado con {len(MEMORIA_CLIENTES)} registros.")
         except Exception as e:
-            logger.error(f"Error leyendo caché de disco: {e}")
+            logger.error(f"Error cargando base local: {e}")
 
-def sincronizar_sheets_background():
-    """Descarga de Google Sheets en segundo plano sin congelar Telegram"""
+def actualizar_cache_sheets():
+    """Actualiza en segundo plano sin trabar el bot"""
     global MEMORIA_CLIENTES
-    while True:
-        try:
-            creds_raw = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-            spreadsheet_id = os.environ.get("SPREADSHEET_ID")
-            if creds_raw and spreadsheet_id:
-                creds = Credentials.from_service_account_info(json.loads(creds_raw), scopes=SCOPES)
-                gc = gspread.authorize(creds)
-                sheet = gc.open_by_key(spreadsheet_id).sheet1
-                registros = sheet.get_all_records()
-                if registros:
-                    MEMORIA_CLIENTES = registros
-                    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-                        json.dump(registros, f, ensure_ascii=False)
-                    logger.info("Base de datos de historial actualizada desde Google Sheets.")
-        except Exception as e:
-            logger.error(f"Error sincronizando Sheets: {e}")
-        # Reintentar o actualizar cada 10 minutos
-        time.sleep(600)
+    try:
+        creds_raw = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+        spreadsheet_id = os.environ.get("SPREADSHEET_ID")
+        if creds_raw and spreadsheet_id:
+            import gspread
+            from google.oauth2.service_account import Credentials
+            SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+            creds = Credentials.from_service_account_info(json.loads(creds_raw), scopes=SCOPES)
+            gc = gspread.authorize(creds)
+            sheet = gc.open_by_key(spreadsheet_id).sheet1
+            data = sheet.get_all_records()
+            if data:
+                MEMORIA_CLIENTES = data
+                with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False)
+                logger.info("Base de clientes actualizada con éxito en segundo plano.")
+    except Exception as e:
+        logger.error(f"Sincronización de fondo omitida: {e}")
 
-def buscar_historial_rapido(busqueda):
-    """Búsqueda en memoria RAM (0.001 segundos)"""
-    global MEMORIA_CLIENTES
-    if not MEMORIA_CLIENTES:
-        cargar_cache_desde_disco()
-
+def buscar_historial_inmediato(busqueda):
     termino = busqueda.strip().lower()
     for r in reversed(MEMORIA_CLIENTES):
         hosp = str(r.get("Hospital Name", "")).strip().lower()
@@ -166,15 +158,15 @@ async def get_buscar_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE)
     busqueda = update.message.text
     context.user_data["hospital"] = busqueda
     
-    # Búsqueda instantánea
-    previo = buscar_historial_rapido(busqueda)
+    # Búsqueda local instantánea (sin demora de red)
+    previo = buscar_historial_inmediato(busqueda)
     
     if previo:
         context.user_data["sug_data"] = previo
         teclado = [["✅ Sí, autocompletar"], ["✏️ No, ingresar manual"]]
         reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
         await update.message.reply_text(
-            f"💡 Datos encontrados en historial:\n"
+            f"💡 Historial encontrado:\n"
             f"🏥 Clínica: {previo['hospital']}\n"
             f"👤 Contacto: {previo['contacto']}\n"
             f"📞 Teléfono: {previo['telefono']}\n"
@@ -396,6 +388,15 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💵 Moneda y cobro:", reply_markup=reply_markup)
     return MONEDA
 
+def limpiar_formas_graficas_de_celda(celda):
+    """Elimina formas de dibujo, marcos flotantes y caracteres extraños de la celda"""
+    tc_elem = celda._tc
+    # Eliminar dibujos vectoriales flotantes (DrawingML y VML shapes)
+    for elem in tc_elem.xpath('.//*[local-name()="drawing" or local-name()="pict" or local-name()="shape"]'):
+        elem.getparent().remove(elem)
+    # Limpiar texto de párrafos existentes
+    celda.text = ""
+
 async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["moneda"] = "" if txt == "Dejar vacío" else txt
@@ -456,10 +457,18 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Fila 5: Horómetro
     t.rows[5].cells[1].text = horometro
 
-    # --- FILA 6: TIPO DE SERVICIO (TÍTULO A LA IZQUIERDA Y DOS MITADES ORDENADAS A LA DERECHA) ---
-    # Restaurar título a la izquierda
-    t.rows[6].cells[0].text = "Tipo de Servicio\n(Service Type)"
-    
+    # --- FILA 6: TIPO DE SERVICIO (DESTRUCCIÓN TOTAL DE CUADROS FLOTANTES Y DISEÑO LIMPIO) ---
+    fila_serv = t.rows[6]
+    for cell in fila_serv.cells:
+        limpiar_formas_graficas_de_celda(cell)
+
+    # Celda izquierda: Título exacto
+    fila_serv.cells[0].text = "Tipo de Servicio\n(Service Type)"
+    p_tit = fila_serv.cells[0].paragraphs[0]
+    p_tit.paragraph_format.space_before = Pt(2)
+    p_tit.paragraph_format.space_after = Pt(2)
+
+    # Celda derecha: Dos columnas perfectas con corchetes
     col1 = [
         ("Mantenimiento Correctivo (Repair)", "correctivo"),
         ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
@@ -472,28 +481,26 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("Seguimiento Tratamiento", "seguimiento"),
         ("Otro (Other)", "otro")
     ]
-    
-    celda_serv = t.rows[6].cells[-1]
-    celda_serv.text = ""  # Limpiar totalmente para quitar cuadros viejos
-    
+
+    celda_datos = fila_serv.cells[-1]
     for r_idx in range(4):
-        p_row = celda_serv.add_paragraph() if r_idx > 0 else celda_serv.paragraphs[0]
+        p_row = celda_datos.add_paragraph() if r_idx > 0 else celda_datos.paragraphs[0]
         p_row.paragraph_format.space_before = Pt(0)
         p_row.paragraph_format.space_after = Pt(0)
         p_row.paragraph_format.line_spacing = 1.0
-        
-        # Mitad 1
+
+        # Mitad izquierda
         op1, k1 = col1[r_idx]
         sel1 = k1 in tipo_serv.lower()
         m1 = "[ X ]" if sel1 else "[   ]"
-        r1 = p_row.add_run(f"{op1:<40} {m1}")
+        r1 = p_row.add_run(f"{op1:<42} {m1}")
         r1.font.size = Pt(8.5 if sel1 else 8)
         if sel1:
             r1.bold = True
-            
-        p_row.add_run("        ")
-        
-        # Mitad 2
+
+        p_row.add_run("       ")
+
+        # Mitad derecha
         op2, k2 = col2[r_idx]
         sel2 = k2 in tipo_serv.lower()
         m2 = "[ X ]" if sel2 else "[   ]"
@@ -505,7 +512,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Fila 7: Detalles
     t.rows[7].cells[-1].text = detalles
 
-    # --- FILA 8: CLASIFICACIÓN DE FALLAS (ELIMINACIÓN DE CUADRITOS EN TODAS LAS CELDAS) ---
+    # --- FILA 8: CLASIFICACIÓN DE FALLAS (ELIMINACIÓN DE TODOS LOS CUADROS EN CADA CELDA) ---
     fallas_map = {
         "hidráulico": "Fallo Hidráulico (Hydraulic fault)",
         "hidraulico": "Fallo Hidráulico (Hydraulic fault)",
@@ -518,36 +525,36 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "desgaste": "Fallo de desgaste rápido de pieza (Quick-wear part)",
         "otros": "Otros Fallos (Others fault)"
     }
-    
-    # Recorrer todas las filas de la sección de fallas (filas 8 y posibles filas divididas)
+
+    # Limpiar y reescribir todas las celdas de fallas
     for r_idx in range(len(t.rows)):
-        txt_fila = " ".join([c.text.lower() for c in t.rows[r_idx].cells])
-        if "clasificación de fallas" in txt_fila or "fault classification" in txt_fila or "hidraulico" in txt_fila or "mecanico" in txt_fila:
+        txt_f = " ".join([c.text.lower() for c in t.rows[r_idx].cells])
+        if "clasificación de fallas" in txt_f or "fault classification" in txt_f or "hidraulico" in txt_f or "mecanico" in txt_f:
             for c in t.rows[r_idx].cells:
                 txt_c = c.text.lower()
-                for k_falla, nombre_completo in fallas_map.items():
+                for k_falla, nombre_falla in fallas_map.items():
                     if k_falla in txt_c:
                         es_sel = (falla_tipo and k_falla in falla_tipo.lower() and falla_tipo != "Ninguno / Normal")
                         marca = "[ X ]" if es_sel else "[   ]"
-                        c.text = ""  # Borrado garantizado del cuadrito gráfico
+                        limpiar_formas_graficas_de_celda(c)
                         p = c.paragraphs[0]
                         p.paragraph_format.space_before = Pt(0)
                         p.paragraph_format.space_after = Pt(0)
                         p.paragraph_format.line_spacing = 1.0
-                        r_txt = p.add_run(f"{nombre_completo}  {marca}")
+                        r_txt = p.add_run(f"{nombre_falla}  {marca}")
                         r_txt.font.size = Pt(8.5 if es_sel else 7.5)
                         if es_sel:
                             r_txt.bold = True
                         break
 
-    # Fila 9: Motivo del Fallo y Solución
+    # Fila 9: Motivo del Fallo y Solución (celda contigua)
     for r_idx in range(len(t.rows)):
         c_primera = t.rows[r_idx].cells[0].text.lower()
         if "motivo del fallo" in c_primera or "fault reason" in c_primera:
             t.rows[r_idx].cells[-1].text = solucion
             break
 
-    # Fila 10: Lista de verificación (Checklist con [ ✔ ] en corchetes)
+    # Fila 10: Lista de verificación (Checklist con [ ✔ ] al final)
     for r_idx in range(len(t.rows)):
         fila_txt = " ".join([c.text.lower() for c in t.rows[r_idx].cells])
         if "apariencia" in fila_txt or "lista de verificación" in fila_txt:
@@ -557,7 +564,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if item_clave in c.text.lower():
                         es_chequeado = item_full in checklist_sel
                         marca = "[ ✔ ]" if es_chequeado else "[   ]"
-                        c.text = ""
+                        limpiar_formas_graficas_de_celda(c)
                         p = c.paragraphs[0]
                         p.paragraph_format.space_before = Pt(0)
                         p.paragraph_format.space_after = Pt(0)
@@ -578,12 +585,12 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for r in t.rows:
         if any("encuesta de satisfacción" in c.text.lower() or "satisfaction" in c.text.lower() for c in r.cells):
             c_sat = r.cells[-1]
-            c_sat.text = ""
+            limpiar_formas_graficas_de_celda(c_sat)
             p_sat = c_sat.paragraphs[0]
             p_sat.paragraph_format.space_before = Pt(0)
             p_sat.paragraph_format.space_after = Pt(0)
             p_sat.paragraph_format.line_spacing = 1.0
-            
+
             p_sat.add_run("Encuesta de satisfacción (Are you satisfied with the service):\n").font.size = Pt(8)
             for sat_op in opciones_sat:
                 marca = "[ ✔ ]" if (satisfaccion and sat_op.split()[0].lower() in satisfaccion.lower()) else "[   ]"
@@ -600,7 +607,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     t2.rows[2].cells[1].text = fecha_reporte
     t2.rows[2].cells[3].text = fecha_reporte
 
-    # Determinar qué firma usar
+    # Firma del ingeniero
     archivo_firma = context.user_data.get("firma_custom")
     if not archivo_firma:
         for f_nom in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
@@ -625,7 +632,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ Reporte generado: título restaurado, 2 mitades perfectas, 0 cuadritos viejos, corchetes [ X ] destacados y 1 sola hoja."
+            caption="✅ Reporte generado: cero cuadros flotantes, formato limpio en corchetes y 1 sola hoja."
         )
 
     return ConversationHandler.END
@@ -639,12 +646,12 @@ def main():
     t = threading.Thread(target=iniciar_servidor_web, daemon=True)
     t.start()
 
-    # Cargar caché desde archivo si ya existe
-    cargar_cache_desde_disco()
+    # Cargar base de datos local en memoria
+    cargar_cache()
 
-    # Sincronización en segundo plano con Google Sheets (no bloquea a los usuarios)
-    t_sheets = threading.Thread(target=sincronizar_sheets_background, daemon=True)
-    t_sheets.start()
+    # Sincronización en segundo plano con Sheets
+    t_sync = threading.Thread(target=actualizar_cache_sheets, daemon=True)
+    t_sync.start()
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -652,7 +659,7 @@ def main():
         sys.exit(1)
 
     app = ApplicationBuilder().token(token).build()
-    
+
     conv = ConversationHandler(
         entry_points=[CommandHandler("reporte", iniciar_reporte)],
         states={
@@ -680,10 +687,10 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
-    
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv)
-    
+
     logger.info("Bot de Reportes listo.")
     app.run_polling()
 
