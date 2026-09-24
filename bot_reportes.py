@@ -16,7 +16,7 @@ from telegram.ext import (
     filters,
 )
 import docx
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
 import gspread
@@ -45,7 +45,7 @@ def iniciar_servidor_web():
     servidor = HTTPServer(("0.0.0.0", puerto), HealthHandler)
     servidor.serve_forever()
 
-# Google Sheets Autocompletado
+# Búsqueda en Google Sheets
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 def buscar_historial(busqueda):
@@ -219,6 +219,7 @@ async def get_version_sw(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ["Diagnostico (Diagnostic / Inspection)"],
         ["Entrenamiento (Operation training)"],
         ["Seguimiento Tratamiento"],
+        ["Desinstalación (Uninstallation)"],
         ["Otro (Other)"]
     ]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
@@ -425,7 +426,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Fila 5: Horómetro
     t.rows[5].cells[1].text = horometro
 
-    # Fila 6: Tipo de Servicio (Diseño en 2 columnas compactas en negro)
+    # Fila 6: Tipo de Servicio (Limpieza total de formas flotantes y formato en corchetes)
     col1 = [
         ("Mantenimiento Correctivo (Repair)", "correctivo"),
         ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
@@ -440,24 +441,24 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     celda_serv = t.rows[6].cells[-1]
-    celda_serv.text = ""
+    celda_serv.text = ""  # Elimina todo el texto previo y los cuadros flotantes
     for r_idx in range(4):
         p_row = celda_serv.add_paragraph() if r_idx > 0 else celda_serv.paragraphs[0]
         p_row.paragraph_format.space_before = Pt(0)
         p_row.paragraph_format.space_after = Pt(0)
         p_row.paragraph_format.line_spacing = 1.0
         
-        # Columna Izquierda
+        # Columna 1
         op1, k1 = col1[r_idx]
         m1 = "[ X ]" if k1 in tipo_serv.lower() else "[   ]"
-        r1 = p_row.add_run(f"{op1:<40} {m1}")
+        r1 = p_row.add_run(f"{op1:<42} {m1}")
         r1.font.size = Pt(8)
         if m1 == "[ X ]":
             r1.bold = True
             
-        p_row.add_run("        ")
+        p_row.add_run("       ")
         
-        # Columna Derecha
+        # Columna 2
         op2, k2 = col2[r_idx]
         m2 = "[ X ]" if k2 in tipo_serv.lower() else "[   ]"
         r2 = p_row.add_run(f"{op2:<35} {m2}")
@@ -468,7 +469,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Fila 7: Detalles
     t.rows[7].cells[-1].text = detalles
 
-    # Fila 8: Clasificación de Fallas ([ X ] solo en la falla elegida)
+    # Fila 8: Clasificación de Fallas (Reemplazo de cuadros por corchetes [   ] / [ X ])
     opciones_fallas = [
         "Fallo Hidráulico (Hydraulic fault)",
         "Fallo en el Circuito (Circuit fault)",
@@ -502,7 +503,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             t.rows[r_idx].cells[-1].text = solucion
             break
 
-    # Fila 10: Lista de verificación (Checklist ordenado con [ ✔ ] en negro)
+    # Fila 10: Lista de verificación (Checklist con [ ✔ ] al final)
     for r_idx in range(len(t.rows)):
         fila_txt = " ".join([c.text.lower() for c in t.rows[r_idx].cells])
         if "apariencia" in fila_txt or "lista de verificación" in fila_txt:
@@ -522,7 +523,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         if es_chequeado:
                             r_item.bold = True
 
-    # Fila 12: Encuesta de satisfacción (Usando [ ✔ ] en negro)
+    # Fila 12: Encuesta de satisfacción (con [ ✔ ] al final)
     opciones_sat = [
         "Satisfecho (Satisfied)",
         "Relativamente satisfecho",
@@ -580,7 +581,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ Reporte generado: [ X ] en fallas/servicio, [ ✔ ] en verificación/satisfacción, texto en negro y 1 sola hoja exacta."
+            caption="✅ Reporte generado: [ X ] en servicio y fallas, [ ✔ ] en checklist y satisfacción, sin cuadros flotantes y en 1 sola hoja exacta."
         )
 
     return ConversationHandler.END
