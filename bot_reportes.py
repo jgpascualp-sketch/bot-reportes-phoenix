@@ -1,6 +1,5 @@
 import os
 import sys
-import json
 import logging
 import threading
 from datetime import datetime
@@ -27,7 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Servidor HTTP para Render
+# Servidor HTTP Render
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -77,13 +76,16 @@ ITEMS_CHECKLIST = [
     FALLA_TIPO,
     SOLUCION,
     CHECKLIST_MENU,
+    REP_PARTE,
+    REP_CANT,
+    REP_OBS,
     SATISFACCION,
     INGENIERO,
     OPCION_FIRMA,
     SUBIR_FIRMA,
     FECHA,
     MONEDA,
-) = range(20)
+) = range(23)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Usa /reporte para generar un nuevo reporte técnico.")
@@ -221,16 +223,10 @@ async def checklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     if data == "chk_DONE":
         await query.message.reply_text(f"✅ Se seleccionaron {len(sel)} ítems.")
-        teclado = [
-            ["Satisfecho (Satisfied)"],
-            ["Relativamente satisfecho"],
-            ["Normal (Normal)"],
-            ["Insatisfecho (Dissatisfied)"],
-            ["Muy Insatisfecho (Very Dissatisfied)"]
-        ]
+        teclado = [["Omitir / Todo Vacío"], ["Dejar vacío"]]
         reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-        await query.message.reply_text("⭐ Encuesta de satisfacción / Opinión de usuario:", reply_markup=reply_markup)
-        return SATISFACCION
+        await query.message.reply_text("⚙️ Registro de componentes:\nIngrese Nombre de la parte (Component name):", reply_markup=reply_markup)
+        return REP_PARTE
         
     elif data == "chk_ALL":
         context.user_data["checklist_seleccionados"] = list(ITEMS_CHECKLIST)
@@ -244,6 +240,51 @@ async def checklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await query.edit_message_reply_markup(reply_markup=armar_teclado_checklist(context.user_data["checklist_seleccionados"]))
     return CHECKLIST_MENU
+
+async def get_rep_parte(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text
+    if txt == "Omitir / Todo Vacío":
+        context.user_data["rep_parte"] = ""
+        context.user_data["rep_cant"] = ""
+        context.user_data["rep_obs"] = ""
+        teclado = [
+            ["Satisfecho (Satisfied)"],
+            ["Relativamente satisfecho"],
+            ["Normal (Normal)"],
+            ["Insatisfecho (Dissatisfied)"],
+            ["Muy Insatisfecho (Very Dissatisfied)"]
+        ]
+        reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
+        await update.message.reply_text("⭐ Encuesta de satisfacción / Opinión de usuario:", reply_markup=reply_markup)
+        return SATISFACCION
+        
+    context.user_data["rep_parte"] = "" if txt == "Dejar vacío" else txt
+    teclado = [["Dejar vacío"]]
+    reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
+    await update.message.reply_text("⚙️ Ingrese Cantidad (Quantity):", reply_markup=reply_markup)
+    return REP_CANT
+
+async def get_rep_cant(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text
+    context.user_data["rep_cant"] = "" if txt == "Dejar vacío" else txt
+    teclado = [["Dejar vacío"]]
+    reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
+    await update.message.reply_text("⚙️ Ingrese Observación (Remark):", reply_markup=reply_markup)
+    return REP_OBS
+
+async def get_rep_obs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text
+    context.user_data["rep_obs"] = "" if txt == "Dejar vacío" else txt
+    teclado = [
+        ["Satisfecho (Satisfied)"],
+        ["Relativamente satisfecho"],
+        ["Normal (Normal)"],
+        ["Insatisfecho (Dissatisfied)"],
+        ["Muy Insatisfecho (Very Dissatisfied)"]
+    ]
+    reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
+    await update.message.reply_text("⭐ Encuesta de satisfacción / Opinión de usuario:", reply_markup=reply_markup)
+    return SATISFACCION
 
 async def get_satisfaccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["satisfaccion"] = update.message.text
@@ -301,18 +342,29 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💵 Moneda y cobro:", reply_markup=reply_markup)
     return MONEDA
 
+def escribir_con_espacio(celda, texto, negrita=False):
+    """Escribe el texto con un espacio de separación del borde de la celda"""
+    celda.text = ""
+    p = celda.paragraphs[0]
+    p.paragraph_format.space_before = Pt(1)
+    p.paragraph_format.space_after = Pt(1)
+    run = p.add_run(f"  {texto}")
+    run.font.size = Pt(8)
+    if negrita:
+        run.bold = True
+
 async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["moneda"] = "" if txt == "Dejar vacío" else txt
     
-    await update.message.reply_text("⏳ Procesando reporte en la plantilla corregida...")
+    await update.message.reply_text("⏳ Procesando reporte...")
     
     plantilla = "1-TECHNICAL SERVICE REPORT corregido.docx"
     if not os.path.exists(plantilla):
         plantilla = "1-TECHNICAL SERVICE REPORT.docx"
 
     if not os.path.exists(plantilla):
-        await update.message.reply_text("⚠️ No se encontró la plantilla en el repositorio.")
+        await update.message.reply_text("⚠️ No se encontró la plantilla .docx.")
         return ConversationHandler.END
 
     doc = docx.Document(plantilla)
@@ -330,6 +382,9 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     solucion = context.user_data.get("solucion", "")
     tipo_serv = context.user_data.get("tipo_servicio", "")
     falla_tipo = context.user_data.get("falla_tipo", "")
+    rep_p = context.user_data.get("rep_parte", "")
+    rep_c = context.user_data.get("rep_cant", "")
+    rep_o = context.user_data.get("rep_obs", "")
     satisfaccion = context.user_data.get("satisfaccion", "")
     checklist_sel = context.user_data.get("checklist_seleccionados", [])
     ingeniero = context.user_data.get("ingeniero", "Jesus Guillermo Pascual chalan")
@@ -342,32 +397,34 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for r in t.rows[:2]:
             for c in r.cells:
                 if "consecutivo" in c.text.lower():
-                    c.text = f"Consecutivo (Consecutive)\n{consecutivo}"
+                    c.text = f"  Consecutivo (Consecutive)\n  {consecutivo}"
                     break
 
-    # 1. Datos del cliente y equipo
+    # 1. Datos del cliente y equipo (con espacio separador del borde)
     for r in t.rows:
         txt_fila = [c.text.strip().lower() for c in r.cells]
         if any("hospital name" in x for x in txt_fila):
-            r.cells[1].text = hosp
+            escribir_con_espacio(r.cells[1], hosp)
         if any("contact" in x for x in txt_fila) and any("phone" in x for x in txt_fila):
-            r.cells[1].text = contacto
-            r.cells[-1].text = telefono
+            escribir_con_espacio(r.cells[1], contacto)
+            escribir_con_espacio(r.cells[-1], telefono)
         if any("adress" in x or "dirección" in x for x in txt_fila):
-            r.cells[1].text = direccion
+            escribir_con_espacio(r.cells[1], direccion)
         if any("model" in x for x in txt_fila) and any("version" in x for x in txt_fila):
-            r.cells[1].text = modelo
-            r.cells[-1].text = version_sw
+            escribir_con_espacio(r.cells[1], modelo)
+            escribir_con_espacio(r.cells[-1], version_sw)
         if any("serial no" in x for x in txt_fila):
-            r.cells[1].text = serie
+            escribir_con_espacio(r.cells[1], serie)
         if any("running" in x or "horometro" in x for x in txt_fila):
-            r.cells[1].text = horometro
+            escribir_con_espacio(r.cells[1], horometro)
         if any("feedback details" in x or "detalles" in x for x in txt_fila):
-            r.cells[-1].text = detalles
+            # Formato exacto solicitado para el título
+            r.cells[0].text = "Detalles\n(Feedback Details)"
+            escribir_con_espacio(r.cells[-1], detalles)
         if any("motivo del fallo" in x or "fault reason" in x for x in txt_fila):
-            r.cells[-1].text = solucion
+            escribir_con_espacio(r.cells[-1], solucion)
 
-    # 2. Tipo de Servicio
+    # 2. Tipo de Servicio: Conservar título exacto a la izquierda y columnas a la derecha
     col1 = [
         ("Mantenimiento Correctivo (Repair)", "correctivo"),
         ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
@@ -383,6 +440,10 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for r in t.rows:
         if any("service type" in c.text.lower() or "tipo de servicio" in c.text.lower() for c in r.cells):
+            # Título celda izquierda
+            r.cells[0].text = "Tipo de Servicio\n(Service Type)"
+            r.cells[0].paragraphs[0].paragraph_format.space_before = Pt(2)
+            
             c_izq = r.cells[1]
             c_izq.text = ""
             for idx, (op, clave) in enumerate(col1):
@@ -392,7 +453,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 p.paragraph_format.line_spacing = 1.0
                 sel = clave in tipo_serv.lower()
                 marca = "[ X ]" if sel else "[   ]"
-                run = p.add_run(f"{op}  {marca}")
+                run = p.add_run(f"  {op}  {marca}")
                 run.font.size = Pt(8)
                 if sel:
                     run.bold = True
@@ -406,7 +467,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 p.paragraph_format.line_spacing = 1.0
                 sel = clave in tipo_serv.lower()
                 marca = "[ X ]" if sel else "[   ]"
-                run = p.add_run(f"{op}  {marca}")
+                run = p.add_run(f"  {op}  {marca}")
                 run.font.size = Pt(8)
                 if sel:
                     run.bold = True
@@ -440,21 +501,21 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         p.paragraph_format.space_before = Pt(0)
                         p.paragraph_format.space_after = Pt(0)
                         p.paragraph_format.line_spacing = 1.0
-                        run = p.add_run(f"{nombre}  {marca}")
+                        run = p.add_run(f"  {nombre}  {marca}")
                         run.font.size = Pt(7.5)
                         if es_sel:
                             run.bold = True
                         break
 
-    # 4. Lista de Verificación
+    # 4. Lista de Verificación (Corrigiendo Conductividad y Temperatura)
     for r in t.rows:
         txt_r = " ".join([c.text.lower() for c in r.cells])
-        if "apariencia" in txt_r or "pantalla táctil" in txt_r or "lista de verificación" in txt_r:
+        if "apariencia" in txt_r or "pantalla táctil" in txt_r or "calibración" in txt_r or "conductividad" in txt_r:
             for c in r.cells:
-                txt_c = c.text.lower()
+                txt_c = " ".join(c.text.lower().split())  # Normaliza espacios
                 for item_full in ITEMS_CHECKLIST:
                     item_clave = item_full.split("(")[0].strip().lower()
-                    if item_clave in txt_c:
+                    if item_clave in txt_c or (item_clave == "calibración de conductividad" and "conductiv" in txt_c) or (item_clave == "calibración de temperatura" and "temperat" in txt_c):
                         es_chk = item_full in checklist_sel
                         marca = "[ ✔ ]" if es_chk else "[   ]"
                         c.text = ""
@@ -462,13 +523,26 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         p.paragraph_format.space_before = Pt(0)
                         p.paragraph_format.space_after = Pt(0)
                         p.paragraph_format.line_spacing = 1.0
-                        run = p.add_run(f"{item_full}  {marca}")
+                        run = p.add_run(f"  {item_full}  {marca}")
                         run.font.size = Pt(7.5)
                         if es_chk:
                             run.bold = True
                         break
 
-    # 5. Encuesta de Satisfacción
+    # 5. Registro de Reemplazo de Componentes (llenar fila si se ingresaron datos)
+    if rep_p or rep_c or rep_o:
+        for r_idx, r in enumerate(t.rows):
+            txt_r = " ".join([c.text.lower() for c in r.cells])
+            if "nombre de la parte" in txt_r or "component name" in txt_r:
+                if r_idx + 1 < len(t.rows):
+                    fila_target = t.rows[r_idx + 1]
+                    if len(fila_target.cells) >= 3:
+                        escribir_con_espacio(fila_target.cells[0], rep_p)
+                        escribir_con_espacio(fila_target.cells[1], rep_c)
+                        escribir_con_espacio(fila_target.cells[2], rep_o)
+                break
+
+    # 6. Encuesta de Satisfacción (Centrada y limpia)
     opciones_sat = [
         "Satisfecho (Satisfield)",
         "Relativamente satisfecho",
@@ -481,8 +555,9 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             c_sat = r.cells[-1]
             c_sat.text = ""
             p = c_sat.paragraphs[0]
-            p.paragraph_format.space_before = Pt(0)
-            p.paragraph_format.space_after = Pt(0)
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.space_before = Pt(1)
+            p.paragraph_format.space_after = Pt(1)
             p.paragraph_format.line_spacing = 1.0
             p.add_run("Encuesta de satisfacción (Are you satisfield with the service):\n").font.size = Pt(8)
             for sat_op in opciones_sat:
@@ -493,16 +568,16 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     run.bold = True
             break
 
-    # 6. Firmas
+    # 7. Firmas
     t_firmas = doc.tables[1] if len(doc.tables) > 1 else t
     for r in t_firmas.rows:
         txt_r = [c.text.lower() for c in r.cells]
         if any("customer name" in x for x in txt_r) or any("nombre del cliente" in x for x in txt_r):
-            r.cells[1].text = contacto
-            r.cells[3].text = ingeniero
+            escribir_con_espacio(r.cells[1], contacto)
+            escribir_con_espacio(r.cells[3], ingeniero)
         if any("signature date" in x for x in txt_r) or any("fecha de firma" in x for x in txt_r):
-            r.cells[1].text = fecha_reporte
-            r.cells[3].text = fecha_reporte
+            escribir_con_espacio(r.cells[1], fecha_reporte)
+            escribir_con_espacio(r.cells[3], fecha_reporte)
 
     archivo_firma = context.user_data.get("firma_custom")
     if not archivo_firma:
@@ -531,7 +606,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ Reporte generado en 1 sola hoja exacta con formato limpio y marcas precisas."
+            caption="✅ Reporte generado con alineación holgada, título visible y corchetes completos."
         )
 
     return ConversationHandler.END
@@ -569,6 +644,9 @@ def main():
             FALLA_TIPO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_falla_tipo)],
             SOLUCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_solucion)],
             CHECKLIST_MENU: [CallbackQueryHandler(checklist_callback)],
+            REP_PARTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_rep_parte)],
+            REP_CANT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_rep_cant)],
+            REP_OBS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_rep_obs)],
             SATISFACCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_satisfaccion)],
             INGENIERO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_ingeniero)],
             OPCION_FIRMA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_opcion_firma)],
