@@ -17,6 +17,7 @@ from telegram.ext import (
 )
 import docx
 from docx.shared import Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -27,7 +28,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Servidor web Render
+# Servidor HTTP para Render
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -43,7 +44,7 @@ def iniciar_servidor_web():
     servidor = HTTPServer(("0.0.0.0", puerto), HealthHandler)
     servidor.serve_forever()
 
-# Google Sheets Autocompletado
+# Búsqueda en Google Sheets
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 def buscar_historial(busqueda):
@@ -72,27 +73,25 @@ def buscar_historial(busqueda):
         logger.error(f"Error Sheets: {e}")
     return None
 
-# Lista fija de verificación
 ITEMS_CHECKLIST = [
-    "Apariencia (Appearance check)",
-    "Bateria de respaldo (Backup battery)",
-    "Placa Hall o Tarjeta electronica",
-    "Señal de sensor (Sensor signal)",
-    "Pantalla táctil (Touch screen)",
-    "Pieza hidráulica (Hydraulic parts)",
+    "Apariencia",
+    "Bateria de respaldo",
+    "Placa Hall",
+    "Señal de sensor",
+    "Pantalla táctil",
+    "Pieza hidráulica",
     "Parametros de Tratamiento",
-    "Sim. de Tratamiento (Simulation treatment)",
-    "Opciones (Options)",
-    "Sensor de Cond (Conductivity sensor)",
-    "Bomba Ceramica (Ceramic pump)",
-    "Bomba de Heparina (Syringe pump)",
+    "Sim. de Tratamiento",
+    "Opciones",
+    "Sensor de Cond",
+    "Bomba Ceramica",
+    "Bomba de Heparina",
     "Calibración de Conductividad",
     "Calibración de Temperatura",
     "Calibración de Presión",
-    "Otros (Other)"
+    "Otros"
 ]
 
-# Estados
 (
     CONSECUTIVO,
     BUSCAR_CLIENTE,
@@ -118,7 +117,7 @@ ITEMS_CHECKLIST = [
 ) = range(21)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Usa /reporte para iniciar el formulario técnico.")
+    await update.message.reply_text("👋 Usa /reporte para generar un nuevo reporte técnico.")
 
 async def iniciar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -131,7 +130,7 @@ async def iniciar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_consecutivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["consecutivo"] = "" if txt == "Dejar vacío" else txt
-    await update.message.reply_text("🏥 Ingrese Nombre de la Clínica o Contacto para autocompletar:", reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text("🏥 Ingrese Nombre de la Clínica o Contacto para buscar historial:", reply_markup=ReplyKeyboardRemove())
     return BUSCAR_CLIENTE
 
 async def get_buscar_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -216,7 +215,7 @@ async def get_version_sw(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ["Mantenimiento Correctivo (Repair)"],
         ["Mantenimiento Preventivo (PM)"],
         ["Instalación (Installation)"],
-        ["Diagnostico (Diagnostic / Inspection)"],
+        ["Diagnostico"],
         ["Entrenamiento (Operation training)"],
         ["Seguimiento Tratamiento"],
         ["Otro (Other)"]
@@ -233,8 +232,8 @@ async def get_tipo_servicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_detalles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["detalles"] = update.message.text
     teclado = [
-        ["Fallo Mecánico", "Fallo Hidráulico"],
-        ["Fallo en el Circuito", "Fallo en Software"],
+        ["Fallo Hidráulico", "Fallo en el Circuito"],
+        ["Fallo Mecánico", "Fallo en Software"],
         ["Fallo en parte de sangre", "Fallo de montaje de pieza"],
         ["Fallo de desgaste rápido de pieza", "Otros Fallos"],
         ["Ninguno / Normal"]
@@ -252,9 +251,15 @@ async def get_falla_tipo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def armar_teclado_checklist(seleccionados):
     botones = []
-    for item in ITEMS_CHECKLIST:
+    fila = []
+    for i, item in enumerate(ITEMS_CHECKLIST):
         marca = "✔ " if item in seleccionados else "⬜ "
-        botones.append([InlineKeyboardButton(f"{marca}{item[:30]}", callback_data=f"chk_{item}")])
+        fila.append(InlineKeyboardButton(f"{marca}{item}", callback_data=f"chk_{item}"))
+        if len(fila) == 2:
+            botones.append(fila)
+            fila = []
+    if fila:
+        botones.append(fila)
     botones.append([InlineKeyboardButton("✨ SELECCIONAR TODO", callback_data="chk_ALL")])
     botones.append([InlineKeyboardButton("✅ LISTO / CONTINUAR", callback_data="chk_DONE")])
     return InlineKeyboardMarkup(botones)
@@ -265,7 +270,7 @@ async def get_solucion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     markup = armar_teclado_checklist(context.user_data["checklist_seleccionados"])
     await update.message.reply_text(
-        "📋 Lista de verificación:\nToca los ítems que deseas marcar con ✔ y al terminar pulsa 'LISTO / CONTINUAR':",
+        "📋 Lista de verificación de pruebas:\nSeleccione los ítems que desea marcar con ✔ y al terminar presione 'LISTO / CONTINUAR':",
         reply_markup=markup
     )
     return CHECKLIST_MENU
@@ -277,7 +282,7 @@ async def checklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     sel = context.user_data.get("checklist_seleccionados", [])
     
     if data == "chk_DONE":
-        await query.message.reply_text(f"✅ Se seleccionaron {len(sel)} ítems de la lista de verificación.")
+        await query.message.reply_text(f"✅ Se registraron {len(sel)} comprobaciones en la lista de verificación.")
         teclado = [["Dejar vacío"], ["Ingresar componentes reemplazados"]]
         reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
         await query.message.reply_text("⚙️ Registro de reemplazo de componentes:", reply_markup=reply_markup)
@@ -298,7 +303,7 @@ async def checklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def get_repuestos_opcion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "Dejar vacío":
-        context.user_data["repuestos"] = []
+        context.user_data["repuestos_txt"] = ""
         teclado = [
             ["Satisfecho (Satisfied)"],
             ["Relativamente satisfecho"],
@@ -311,7 +316,7 @@ async def get_repuestos_opcion(update: Update, context: ContextTypes.DEFAULT_TYP
         return SATISFACCION
     else:
         await update.message.reply_text(
-            "Escriba los componentes en este formato:\nNombre de la parte | Cantidad | Observación\n(ej: Válvula solenoide | 2 | Nueva)",
+            "Escriba los componentes en formato:\nNombre de la parte | Cantidad | Observación\n(ej: Válvula solenoide | 2 | Nueva)",
             reply_markup=ReplyKeyboardRemove()
         )
         return REPUESTOS_TEXTO
@@ -361,22 +366,30 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💵 Moneda y cobro:", reply_markup=reply_markup)
     return MONEDA
 
-def reemplazar_en_parrafos(contenedor, texto_buscar, texto_reemplazo):
-    for p in contenedor.paragraphs:
-        if texto_buscar.lower() in p.text.lower():
-            for run in p.runs:
-                if texto_buscar.lower() in run.text.lower():
-                    run.text = run.text.replace(texto_buscar, texto_reemplazo)
-                    return True
-            p.text = p.text.replace(texto_buscar, texto_reemplazo)
-            return True
-    return False
+def reemplazar_cuadro(texto_original, palabra_clave, simbolo="☒"):
+    """Reemplaza únicamente el cuadro adyacente a la palabra clave sin duplicar marcas"""
+    lineas = texto_original.split("\n")
+    nuevas = []
+    marcado = False
+    for l in lineas:
+        if palabra_clave.lower() in l.lower() and not marcado:
+            # Reemplazar caracteres comunes de casillas cuadradas
+            for c_cuadro in ["□", "☐", "⬜", "[ ]", "[]"]:
+                if c_cuadro in l:
+                    l = l.replace(c_cuadro, simbolo, 1)
+                    marcado = True
+                    break
+            if not marcado:
+                l = f"{simbolo} {l}"
+                marcado = True
+        nuevas.append(l)
+    return "\n".join(nuevas)
 
 async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["moneda"] = "" if txt == "Dejar vacío" else txt
     
-    await update.message.reply_text("⏳ Procesando reporte en Word y manteniendo diseño intacto...")
+    await update.message.reply_text("⏳ Procesando reporte...")
     
     plantilla = "1-TECHNICAL SERVICE REPORT.docx"
     if not os.path.exists(plantilla):
@@ -404,134 +417,90 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ingeniero = context.user_data.get("ingeniero", "Jesus Guillermo Pascual chalan")
     fecha_reporte = context.user_data.get("fecha", datetime.now().strftime("%d/%m/%Y"))
 
-    # 1. Consecutivo
+    # Consecutivo
     if consecutivo:
         for p in doc.paragraphs:
             if "consecutivo" in p.text.lower():
                 p.text = f"Consecutivo: {consecutivo}"
                 break
 
-    # 2. Recorrer celdas de las tablas con mapeo inteligente
-    for t in doc.tables:
-        for r in t.rows:
-            # Identificar fila de cliente
-            for i, c in enumerate(r.cells):
-                txt_c = c.text.strip().lower()
-                
-                # Nombre del cliente
-                if "nombre del cliente" in txt_c and i + 1 < len(r.cells):
-                    r.cells[i + 1].text = hosp
-                
-                # Nombre del contacto (sin borrar etiqueta de teléfono)
-                if "nombre de contacto" in txt_c and "telefono" not in txt_c:
-                    if i + 1 < len(r.cells) and "telefono" not in r.cells[i + 1].text.lower():
-                        r.cells[i + 1].text = contacto
-                
-                # Teléfono: buscar la celda específica de valor
-                if "telefono" in txt_c or "number phone" in txt_c:
-                    if i + 1 < len(r.cells):
-                        r.cells[i + 1].text = telefono
+    # Mapeo exacto por posición estructural de la tabla principal
+    t = doc.tables[0]
+    
+    # Fila 0: Nombre del Cliente
+    t.rows[0].cells[1].text = hosp
+    
+    # Fila 1: Contacto (celda 1) y Teléfono (celda 3, a la derecha de la etiqueta)
+    t.rows[1].cells[1].text = contacto
+    if len(t.rows[1].cells) >= 4:
+        t.rows[1].cells[3].text = telefono
+    
+    # Fila 2: Dirección
+    t.rows[2].cells[1].text = direccion
+    
+    # Fila 3: Modelo (celda 1) y Versión de Software (celda 3, a la derecha de la etiqueta)
+    t.rows[3].cells[1].text = modelo
+    if len(t.rows[3].cells) >= 4:
+        t.rows[3].cells[3].text = version_sw
+        
+    # Fila 4: Serie
+    t.rows[4].cells[1].text = serie
+    
+    # Fila 5: Horómetro
+    t.rows[5].cells[1].text = horometro
+    
+    # Fila 6: Tipo de Servicio (Sustituir el cuadro por ☒)
+    c_serv = t.rows[6].cells[1]
+    palabra_ts = tipo_serv.split()[0]
+    c_serv.text = reemplazar_cuadro(c_serv.text, palabra_ts, "☒")
+    
+    # Fila 7: Detalles
+    t.rows[7].cells[1].text = detalles
+    
+    # Fila 8: Clasificación de fallas (Sustituir el cuadro por ☒)
+    if falla_tipo and falla_tipo != "Ninguno / Normal":
+        c_fallas = t.rows[8].cells[1]
+        c_fallas.text = reemplazar_cuadro(c_fallas.text, falla_tipo, "☒")
+        
+    # Fila 9: Motivo del Fallo y Solución
+    t.rows[9].cells[1].text = solucion
+    
+    # Fila 10: Lista de verificación (Sustituir el cuadro por ☑ solo en los seleccionados)
+    c_chk = t.rows[10].cells[1]
+    for chk_item in checklist_sel:
+        c_chk.text = reemplazar_cuadro(c_chk.text, chk_item, "☑")
+        
+    # Fila 11: Reemplazo de componentes
+    if repuestos_txt:
+        t.rows[11].cells[1].text = repuestos_txt
 
-                # Dirección
-                if "dirección" in txt_c or "adress" in txt_c:
-                    if i + 1 < len(r.cells):
-                        r.cells[i + 1].text = direccion
+    # Fila 12: Encuesta de satisfacción (Sustituir el cuadro por ☒)
+    if satisfaccion:
+        c_sat = t.rows[12].cells[1]
+        palabra_sat = satisfaccion.split()[0]
+        c_sat.text = reemplazar_cuadro(c_sat.text, palabra_sat, "☒")
 
-                # Modelo (sin tocar celda de versión de software)
-                if "modelo" in txt_c and "versión" not in txt_c:
-                    if i + 1 < len(r.cells) and "versión" not in r.cells[i + 1].text.lower():
-                        r.cells[i + 1].text = modelo
-
-                # Versión de software: escribir al lado derecho de su título
-                if "versión de software" in txt_c or "operating version" in txt_c:
-                    if i + 1 < len(r.cells):
-                        r.cells[i + 1].text = version_sw
-
-                # Serial No.
-                if "número de serial" in txt_c or "serial no" in txt_c:
-                    if i + 1 < len(r.cells):
-                        r.cells[i + 1].text = serie
-
-                # Horómetro
-                if "horometro" in txt_c or "running hours" in txt_c:
-                    if i + 1 < len(r.cells):
-                        r.cells[i + 1].text = horometro
-
-                # Detalles / Feedback Details
-                if "detalles" in txt_c or "feedback details" in txt_c:
-                    if i + 1 < len(r.cells):
-                        r.cells[i + 1].text = detalles
-
-                # Motivo del Fallo y Solución
-                if "motivo del fallo" in txt_c or "fault reason" in txt_c:
-                    if i + 1 < len(r.cells):
-                        r.cells[i + 1].text = solucion
-
-                # Tipo de Servicio: insertar [X] exacto sin descuadrar
-                if "tipo de servicio" in txt_c or "service type" in txt_c or "correctivo" in txt_c:
-                    for opcion in ["Mantenimiento Correctivo (Repair)", "Mantenimiento Preventivo (PM)", "Instalación (Installation)", "Diagnostico", "Entrenamiento", "Seguimiento", "Otro (Other)"]:
-                        if opcion.split()[0].lower() in tipo_serv.lower() and opcion.split()[0].lower() in c.text.lower():
-                            c.text = c.text.replace(opcion, f"[X] {opcion}")
-
-                # Clasificación de fallas: insertar [X]
-                if falla_tipo and falla_tipo != "Ninguno / Normal":
-                    for p in c.paragraphs:
-                        if falla_tipo.lower() in p.text.lower():
-                            p.text = p.text.replace(falla_tipo, f"[X] {falla_tipo}")
-
-                # Lista de verificación: insertar check ✔ en los elegidos
-                for item_chk in checklist_sel:
-                    nombre_corto = item_chk.split("(")[0].strip()
-                    if nombre_corto.lower() in c.text.lower():
-                        for p in c.paragraphs:
-                            if nombre_corto.lower() in p.text.lower():
-                                p.text = f"✔ {p.text}"
-
-                # Satisfacción del usuario: insertar [X]
-                if satisfaccion:
-                    sat_clave = satisfaccion.split("(")[0].strip()
-                    if sat_clave.lower() in c.text.lower():
-                        for p in c.paragraphs:
-                            if sat_clave.lower() in p.text.lower():
-                                p.text = p.text.replace(sat_clave, f"[X] {sat_clave}")
-
-                # Reemplazo de componentes
-                if repuestos_txt and ("registro de reemplazo" in txt_c or "component replacement" in txt_c):
-                    if i + 1 < len(r.cells):
-                        r.cells[i + 1].text = repuestos_txt
-
-                # Clientes / Ingeniero y Fechas al pie
-                if "customer name" in txt_c:
-                    if i + 1 < len(r.cells):
-                        r.cells[i + 1].text = contacto
-                if "engineer name" in txt_c:
-                    if i + 1 < len(r.cells):
-                        r.cells[i + 1].text = ingeniero
-                if "signature date" in txt_c or "fecha de firma" in txt_c:
-                    if i + 1 < len(r.cells):
-                        r.cells[i + 1].text = fecha_reporte
-
-    # 3. Insertar firma digital (busca cualquier nombre de archivo que exista)
+    # Tabla 1: Firmas y Validaciones
+    t2 = doc.tables[1]
+    t2.rows[0].cells[1].text = contacto
+    t2.rows[0].cells[3].text = ingeniero
+    t2.rows[2].cells[1].text = fecha_reporte
+    t2.rows[2].cells[3].text = fecha_reporte
+    
+    # Inserción y centrado de la firma del ingeniero
     archivo_firma = None
-    for posible in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
-        if os.path.exists(posible):
-            archivo_firma = posible
+    for f_nom in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
+        if os.path.exists(f_nom):
+            archivo_firma = f_nom
             break
-
+            
     if archivo_firma:
-        for t in doc.tables:
-            for r_idx, r in enumerate(t.rows):
-                for c_idx, c in enumerate(r.cells):
-                    # Celda que dice Firma (Engineer Signature)
-                    if "engineer signature" in c.text.lower() or "firma\n(engineer signature)" in c.text.lower():
-                        # Si está vacía o es la celda de la firma del ingeniero (columna derecha)
-                        if c_idx >= len(r.cells) // 2:
-                            c.text = ""
-                            p = c.paragraphs[0]
-                            p.add_run().add_picture(archivo_firma, width=Inches(1.3))
-                            break
+        cell_sig = t2.rows[1].cells[3]
+        cell_sig.text = ""
+        p = cell_sig.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p.add_run().add_picture(archivo_firma, width=Inches(1.1))
 
-    # Guardar documento final
     nombre_docx = f"Reporte_{serie if serie else 'Servicio'}_{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
     doc.save(nombre_docx)
 
@@ -539,7 +508,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ ¡Reporte generado con formato respetado, datos organizados y firma insertada!"
+            caption="✅ Reporte generado: formato original respetado, celdas corregidas y marcas exactas."
         )
 
     return ConversationHandler.END
@@ -591,7 +560,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv)
     
-    logger.info("Bot de Reportes listo y escuchando...")
+    logger.info("Bot de Reportes listo.")
     app.run_polling()
 
 if __name__ == "__main__":
