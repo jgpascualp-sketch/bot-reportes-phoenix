@@ -3,6 +3,7 @@ import sys
 import json
 import logging
 import threading
+import time
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
@@ -45,35 +46,51 @@ def iniciar_servidor_web():
     servidor = HTTPServer(("0.0.0.0", puerto), HealthHandler)
     servidor.serve_forever()
 
-# CACHÉ DE GOOGLE SHEETS PARA RESPUESTA INMEDIATA
+# --- CACHÉ LOCAL RÁPIDO DE HISTORIAL (RESPUESTA INSTANTÁNEA) ---
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-SHEET_CACHE = []
-ULTIMA_CARGA = 0
+CACHE_FILE = "clientes_cache.json"
+MEMORIA_CLIENTES = []
 
-def recargar_cache_sheets():
-    global SHEET_CACHE, ULTIMA_CARGA
-    try:
-        creds_raw = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-        spreadsheet_id = os.environ.get("SPREADSHEET_ID")
-        if not creds_raw or not spreadsheet_id:
-            return
-        creds = Credentials.from_service_account_info(json.loads(creds_raw), scopes=SCOPES)
-        gc = gspread.authorize(creds)
-        sheet = gc.open_by_key(spreadsheet_id).sheet1
-        SHEET_CACHE = sheet.get_all_records()
-        ULTIMA_CARGA = datetime.now().timestamp()
-        logger.info(f"Caché de Google Sheets cargado con {len(SHEET_CACHE)} registros.")
-    except Exception as e:
-        logger.error(f"Error cargando Sheets en segundo plano: {e}")
+def cargar_cache_desde_disco():
+    global MEMORIA_CLIENTES
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                MEMORIA_CLIENTES = json.load(f)
+                logger.info(f"Caché local cargado con {len(MEMORIA_CLIENTES)} registros.")
+        except Exception as e:
+            logger.error(f"Error leyendo caché de disco: {e}")
 
-def buscar_historial(busqueda):
-    global SHEET_CACHE, ULTIMA_CARGA
-    # Si el caché está vacío o tiene más de 15 minutos, recargar en hilo de respaldo
-    if not SHEET_CACHE:
-        recargar_cache_sheets()
-        
+def sincronizar_sheets_background():
+    """Descarga de Google Sheets en segundo plano sin congelar Telegram"""
+    global MEMORIA_CLIENTES
+    while True:
+        try:
+            creds_raw = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+            spreadsheet_id = os.environ.get("SPREADSHEET_ID")
+            if creds_raw and spreadsheet_id:
+                creds = Credentials.from_service_account_info(json.loads(creds_raw), scopes=SCOPES)
+                gc = gspread.authorize(creds)
+                sheet = gc.open_by_key(spreadsheet_id).sheet1
+                registros = sheet.get_all_records()
+                if registros:
+                    MEMORIA_CLIENTES = registros
+                    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                        json.dump(registros, f, ensure_ascii=False)
+                    logger.info("Base de datos de historial actualizada desde Google Sheets.")
+        except Exception as e:
+            logger.error(f"Error sincronizando Sheets: {e}")
+        # Reintentar o actualizar cada 10 minutos
+        time.sleep(600)
+
+def buscar_historial_rapido(busqueda):
+    """Búsqueda en memoria RAM (0.001 segundos)"""
+    global MEMORIA_CLIENTES
+    if not MEMORIA_CLIENTES:
+        cargar_cache_desde_disco()
+
     termino = busqueda.strip().lower()
-    for r in reversed(SHEET_CACHE):
+    for r in reversed(MEMORIA_CLIENTES):
         hosp = str(r.get("Hospital Name", "")).strip().lower()
         cont = str(r.get("Hospital Contact Person", "")).strip().lower()
         if (termino in hosp and hosp) or (termino in cont and cont):
@@ -142,22 +159,22 @@ async def iniciar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_consecutivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["consecutivo"] = "" if txt == "Dejar vacío" else txt
-    await update.message.reply_text("🏥 Ingrese Nombre de la Clínica o Contacto para buscar historial:", reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text("🏥 Ingrese Nombre de la Clínica o Contacto:", reply_markup=ReplyKeyboardRemove())
     return BUSCAR_CLIENTE
 
 async def get_buscar_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE):
     busqueda = update.message.text
     context.user_data["hospital"] = busqueda
     
-    # Búsqueda ultra rápida con caché
-    previo = buscar_historial(busqueda)
+    # Búsqueda instantánea
+    previo = buscar_historial_rapido(busqueda)
     
     if previo:
         context.user_data["sug_data"] = previo
         teclado = [["✅ Sí, autocompletar"], ["✏️ No, ingresar manual"]]
         reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
         await update.message.reply_text(
-            f"💡 Historial encontrado:\n"
+            f"💡 Datos encontrados en historial:\n"
             f"🏥 Clínica: {previo['hospital']}\n"
             f"👤 Contacto: {previo['contacto']}\n"
             f"📞 Teléfono: {previo['telefono']}\n"
@@ -439,7 +456,10 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Fila 5: Horómetro
     t.rows[5].cells[1].text = horometro
 
-    # FILA 6: TIPO DE SERVICIO (Limpieza de TODAS las celdas de esa fila y formateo limpio)
+    # --- FILA 6: TIPO DE SERVICIO (TÍTULO A LA IZQUIERDA Y DOS MITADES ORDENADAS A LA DERECHA) ---
+    # Restaurar título a la izquierda
+    t.rows[6].cells[0].text = "Tipo de Servicio\n(Service Type)"
+    
     col1 = [
         ("Mantenimiento Correctivo (Repair)", "correctivo"),
         ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
@@ -453,75 +473,81 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("Otro (Other)", "otro")
     ]
     
-    # Vaciar todas las celdas de la fila de Tipo de Servicio para borrar cuadros viejos y textos duplicados
-    for cell in t.rows[6].cells:
-        cell.text = ""
-
-    # Escribir el bloque limpio en la celda principal
-    celda_serv = t.rows[6].cells[0] if len(t.rows[6].cells) == 1 else t.rows[6].cells[1]
+    celda_serv = t.rows[6].cells[-1]
+    celda_serv.text = ""  # Limpiar totalmente para quitar cuadros viejos
+    
     for r_idx in range(4):
         p_row = celda_serv.add_paragraph() if r_idx > 0 else celda_serv.paragraphs[0]
         p_row.paragraph_format.space_before = Pt(0)
         p_row.paragraph_format.space_after = Pt(0)
         p_row.paragraph_format.line_spacing = 1.0
         
-        # Columna 1
+        # Mitad 1
         op1, k1 = col1[r_idx]
-        m1 = "[ X ]" if k1 in tipo_serv.lower() else "[   ]"
-        r1 = p_row.add_run(f"{op1:<42} {m1}")
-        r1.font.size = Pt(8)
-        if m1 == "[ X ]":
+        sel1 = k1 in tipo_serv.lower()
+        m1 = "[ X ]" if sel1 else "[   ]"
+        r1 = p_row.add_run(f"{op1:<40} {m1}")
+        r1.font.size = Pt(8.5 if sel1 else 8)
+        if sel1:
             r1.bold = True
             
-        p_row.add_run("       ")
+        p_row.add_run("        ")
         
-        # Columna 2
+        # Mitad 2
         op2, k2 = col2[r_idx]
-        m2 = "[ X ]" if k2 in tipo_serv.lower() else "[   ]"
+        sel2 = k2 in tipo_serv.lower()
+        m2 = "[ X ]" if sel2 else "[   ]"
         r2 = p_row.add_run(f"{op2:<35} {m2}")
-        r2.font.size = Pt(8)
-        if m2 == "[ X ]":
+        r2.font.size = Pt(8.5 if sel2 else 8)
+        if sel2:
             r2.bold = True
 
     # Fila 7: Detalles
     t.rows[7].cells[-1].text = detalles
 
-    # FILA 8: CLASIFICACIÓN DE FALLAS (Limpieza total de cuadrados en cada una de las celdas)
-    opciones_fallas = [
-        "Fallo Hidráulico (Hydraulic fault)",
-        "Fallo en el Circuito (Circuit fault)",
-        "Fallo en parte de sangre (Bloodparts fault)",
-        "Fallo en Software (Software fault)",
-        "Fallo Mecánico (Mechanical fault)",
-        "Fallo de montaje de pieza (Assemble fault)",
-        "Fallo de desgaste rápido de pieza (Quick-wear part)",
-        "Otros Fallos (Others fault)"
-    ]
-    for c in t.rows[8].cells:
-        txt_actual = c.text.lower()
-        for nombre_falla in opciones_fallas:
-            falla_clave = nombre_falla.split("(")[0].strip().lower()
-            if falla_clave in txt_actual:
-                es_sel = (falla_tipo and falla_clave in falla_tipo.lower() and falla_tipo != "Ninguno / Normal")
-                marca = "[ X ]" if es_sel else "[   ]"
-                c.text = ""  # Borra el cuadrado gráfico
-                p = c.paragraphs[0]
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                p.paragraph_format.line_spacing = 1.0
-                r_txt = p.add_run(f"{nombre_falla}  {marca}")
-                r_txt.font.size = Pt(7.5)
-                if es_sel:
-                    r_txt.bold = True
+    # --- FILA 8: CLASIFICACIÓN DE FALLAS (ELIMINACIÓN DE CUADRITOS EN TODAS LAS CELDAS) ---
+    fallas_map = {
+        "hidráulico": "Fallo Hidráulico (Hydraulic fault)",
+        "hidraulico": "Fallo Hidráulico (Hydraulic fault)",
+        "circuito": "Fallo en el Circuito (Circuit fault)",
+        "sangre": "Fallo en parte de sangre (Bloodparts fault)",
+        "software": "Fallo en Software (Software fault)",
+        "mecánico": "Fallo Mecánico (Mechanical fault)",
+        "mecanico": "Fallo Mecánico (Mechanical fault)",
+        "montaje": "Fallo de montaje de pieza (Assemble fault)",
+        "desgaste": "Fallo de desgaste rápido de pieza (Quick-wear part)",
+        "otros": "Otros Fallos (Others fault)"
+    }
+    
+    # Recorrer todas las filas de la sección de fallas (filas 8 y posibles filas divididas)
+    for r_idx in range(len(t.rows)):
+        txt_fila = " ".join([c.text.lower() for c in t.rows[r_idx].cells])
+        if "clasificación de fallas" in txt_fila or "fault classification" in txt_fila or "hidraulico" in txt_fila or "mecanico" in txt_fila:
+            for c in t.rows[r_idx].cells:
+                txt_c = c.text.lower()
+                for k_falla, nombre_completo in fallas_map.items():
+                    if k_falla in txt_c:
+                        es_sel = (falla_tipo and k_falla in falla_tipo.lower() and falla_tipo != "Ninguno / Normal")
+                        marca = "[ X ]" if es_sel else "[   ]"
+                        c.text = ""  # Borrado garantizado del cuadrito gráfico
+                        p = c.paragraphs[0]
+                        p.paragraph_format.space_before = Pt(0)
+                        p.paragraph_format.space_after = Pt(0)
+                        p.paragraph_format.line_spacing = 1.0
+                        r_txt = p.add_run(f"{nombre_completo}  {marca}")
+                        r_txt.font.size = Pt(8.5 if es_sel else 7.5)
+                        if es_sel:
+                            r_txt.bold = True
+                        break
 
-    # Fila 9: Motivo del Fallo y Solución (en la celda de la derecha)
+    # Fila 9: Motivo del Fallo y Solución
     for r_idx in range(len(t.rows)):
         c_primera = t.rows[r_idx].cells[0].text.lower()
         if "motivo del fallo" in c_primera or "fault reason" in c_primera:
             t.rows[r_idx].cells[-1].text = solucion
             break
 
-    # Fila 10: Lista de verificación (Checklist con [ ✔ ] al final)
+    # Fila 10: Lista de verificación (Checklist con [ ✔ ] en corchetes)
     for r_idx in range(len(t.rows)):
         fila_txt = " ".join([c.text.lower() for c in t.rows[r_idx].cells])
         if "apariencia" in fila_txt or "lista de verificación" in fila_txt:
@@ -541,7 +567,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         if es_chequeado:
                             r_item.bold = True
 
-    # Fila 12: Encuesta de satisfacción (con [ ✔ ] al final)
+    # Fila 12: Encuesta de satisfacción
     opciones_sat = [
         "Satisfecho (Satisfied)",
         "Relativamente satisfecho",
@@ -599,7 +625,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ Reporte generado: sin cuadros flotantes, con [ X ] y [ ✔ ], y 1 sola hoja exacta."
+            caption="✅ Reporte generado: título restaurado, 2 mitades perfectas, 0 cuadritos viejos, corchetes [ X ] destacados y 1 sola hoja."
         )
 
     return ConversationHandler.END
@@ -613,8 +639,11 @@ def main():
     t = threading.Thread(target=iniciar_servidor_web, daemon=True)
     t.start()
 
-    # Cargar Google Sheets en segundo plano al iniciar para que no demore en Telegram
-    t_sheets = threading.Thread(target=recargar_cache_sheets, daemon=True)
+    # Cargar caché desde archivo si ya existe
+    cargar_cache_desde_disco()
+
+    # Sincronización en segundo plano con Google Sheets (no bloquea a los usuarios)
+    t_sheets = threading.Thread(target=sincronizar_sheets_background, daemon=True)
     t_sheets.start()
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
