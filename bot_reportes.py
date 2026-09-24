@@ -43,41 +43,26 @@ def iniciar_servidor_web():
     servidor = HTTPServer(("0.0.0.0", puerto), HealthHandler)
     servidor.serve_forever()
 
-# CACHÉ LOCAL RÁPIDO PARA RESPUESTAS INSTANTÁNEAS
+# --- BASE DE DATOS LOCAL SIN BLOQUEOS DE RED (ESTILO CRM) ---
 CACHE_FILE = "clientes_cache.json"
 MEMORIA_CLIENTES = []
 
-def cargar_cache_local():
+def cargar_base_clientes():
     global MEMORIA_CLIENTES
     if os.path.exists(CACHE_FILE):
         try:
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
                 MEMORIA_CLIENTES = json.load(f)
+                logger.info(f"Base local cargada: {len(MEMORIA_CLIENTES)} clientes listos.")
         except Exception as e:
-            logger.error(f"Error leyendo clientes_cache.json: {e}")
+            logger.error(f"Error leyendo base local: {e}")
+            MEMORIA_CLIENTES = []
+    else:
+        MEMORIA_CLIENTES = []
 
-def actualizar_sheets_fondo():
-    global MEMORIA_CLIENTES
-    try:
-        creds_raw = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-        spreadsheet_id = os.environ.get("SPREADSHEET_ID")
-        if creds_raw and spreadsheet_id:
-            import gspread
-            from google.oauth2.service_account import Credentials
-            SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-            creds = Credentials.from_service_account_info(json.loads(creds_raw), scopes=SCOPES)
-            gc = gspread.authorize(creds)
-            sheet = gc.open_by_key(spreadsheet_id).sheet1
-            data = sheet.get_all_records()
-            if data:
-                MEMORIA_CLIENTES = data
-                with open(CACHE_FILE, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False)
-                logger.info("Caché de clientes actualizado desde Sheets.")
-    except Exception as e:
-        logger.error(f"Sincronización en segundo plano: {e}")
-
-def buscar_historial_inmediato(busqueda):
+def buscar_cliente_rapido(busqueda):
+    if not MEMORIA_CLIENTES:
+        cargar_base_clientes()
     termino = busqueda.strip().lower()
     for r in reversed(MEMORIA_CLIENTES):
         hosp = str(r.get("Hospital Name", "")).strip().lower()
@@ -90,6 +75,30 @@ def buscar_historial_inmediato(busqueda):
                 "direccion": str(r.get("Hospital Address", ""))
             }
     return None
+
+def sincronizar_sheets_silencioso():
+    """Solo intenta descargar datos si hay credenciales válidas y con timeout estricto"""
+    global MEMORIA_CLIENTES
+    try:
+        creds_raw = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+        spreadsheet_id = os.environ.get("SPREADSHEET_ID")
+        if not creds_raw or not spreadsheet_id:
+            return
+        import gspread
+        from google.oauth2.service_account import Credentials
+        SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_info(json.loads(creds_raw), scopes=SCOPES)
+        gc = gspread.authorize(creds)
+        # Timeout para evitar bloqueos
+        sheet = gc.open_by_key(spreadsheet_id).sheet1
+        registros = sheet.get_all_records()
+        if registros:
+            MEMORIA_CLIENTES = registros
+            with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump(registros, f, ensure_ascii=False)
+            logger.info(f"Sincronizados {len(registros)} registros desde Google Sheets.")
+    except Exception as e:
+        logger.warning(f"Sheets no disponible o sin conexión (usando base local offline): {e}")
 
 ITEMS_CHECKLIST = [
     "Apariencia (Appearance check)",
@@ -155,7 +164,8 @@ async def get_buscar_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE)
     busqueda = update.message.text
     context.user_data["hospital"] = busqueda
     
-    previo = buscar_historial_inmediato(busqueda)
+    # Búsqueda local inmediata
+    previo = buscar_cliente_rapido(busqueda)
     if previo:
         context.user_data["sug_data"] = previo
         teclado = [["✅ Sí, autocompletar"], ["✏️ No, ingresar manual"]]
@@ -387,15 +397,14 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["moneda"] = "" if txt == "Dejar vacío" else txt
     
-    await update.message.reply_text("⏳ Procesando reporte en la plantilla corregida...")
+    await update.message.reply_text("⏳ Procesando reporte...")
     
-    # Archivo corregido
     plantilla = "1-TECHNICAL SERVICE REPORT corregido.docx"
     if not os.path.exists(plantilla):
         plantilla = "1-TECHNICAL SERVICE REPORT.docx"
 
     if not os.path.exists(plantilla):
-        await update.message.reply_text("⚠️ No se encontró la plantilla .docx en el servidor.")
+        await update.message.reply_text("⚠️ No se encontró la plantilla en el repositorio.")
         return ConversationHandler.END
 
     doc = docx.Document(plantilla)
@@ -428,45 +437,29 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     c.text = f"Consecutivo (Consecutive)\n{consecutivo}"
                     break
 
-    # 1. Datos del cliente y equipo
+    # 1. Datos cliente y equipo
     for r in t.rows:
         txt_fila = [c.text.strip().lower() for c in r.cells]
-        
-        # Hospital Name
         if any("hospital name" in x for x in txt_fila):
             r.cells[1].text = hosp
-            
-        # Contacto y Teléfono
         if any("contact" in x for x in txt_fila) and any("phone" in x for x in txt_fila):
             r.cells[1].text = contacto
             r.cells[-1].text = telefono
-            
-        # Dirección
         if any("adress" in x or "dirección" in x for x in txt_fila):
             r.cells[1].text = direccion
-            
-        # Modelo y Versión de Software
         if any("model" in x for x in txt_fila) and any("version" in x for x in txt_fila):
             r.cells[1].text = modelo
             r.cells[-1].text = version_sw
-            
-        # Serie
         if any("serial no" in x for x in txt_fila):
             r.cells[1].text = serie
-            
-        # Horómetro
         if any("running" in x or "horometro" in x for x in txt_fila):
             r.cells[1].text = horometro
-
-        # Detalles
         if any("feedback details" in x or "detalles" in x for x in txt_fila):
             r.cells[-1].text = detalles
-
-        # Motivo y Solución
         if any("motivo del fallo" in x or "fault reason" in x for x in txt_fila):
             r.cells[-1].text = solucion
 
-    # 2. Tipo de Servicio: rellenar las dos columnas simétricas con [   ] o [ X ]
+    # 2. Tipo de Servicio
     col1 = [
         ("Mantenimiento Correctivo (Repair)", "correctivo"),
         ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
@@ -482,7 +475,6 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for r in t.rows:
         if any("service type" in c.text.lower() or "tipo de servicio" in c.text.lower() for c in r.cells):
-            # Celda izquierda de opciones
             c_izq = r.cells[1]
             c_izq.text = ""
             for idx, (op, clave) in enumerate(col1):
@@ -497,7 +489,6 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if sel:
                     run.bold = True
 
-            # Celda derecha de opciones
             c_der = r.cells[-1]
             c_der.text = ""
             for idx, (op, clave) in enumerate(col2):
@@ -513,7 +504,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     run.bold = True
             break
 
-    # 3. Clasificación de Fallas: escribir el corchete [ X ] en la falla seleccionada
+    # 3. Clasificación de Fallas
     fallas_lista = [
         ("Fallo Hidaulico\n(Hydraulic fault)", "hidráulico", "hidraulico"),
         ("Fallo en el Circuito\n(Circuit fault)", "circuito"),
@@ -547,7 +538,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             run.bold = True
                         break
 
-    # 4. Lista de Verificación: marcar con [ ✔ ] al final solo los elegidos
+    # 4. Lista de Verificación
     for r in t.rows:
         txt_r = " ".join([c.text.lower() for c in r.cells])
         if "apariencia" in txt_r or "pantalla táctil" in txt_r or "lista de verificación" in txt_r:
@@ -569,7 +560,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             run.bold = True
                         break
 
-    # 5. Encuesta de Satisfacción (con [ ✔ ] al final)
+    # 5. Encuesta de Satisfacción
     opciones_sat = [
         "Satisfecho (Satisfield)",
         "Relativamente satisfecho",
@@ -594,7 +585,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     run.bold = True
             break
 
-    # 6. Tabla de Firmas
+    # 6. Firmas
     t_firmas = doc.tables[1] if len(doc.tables) > 1 else t
     for r in t_firmas.rows:
         txt_r = [c.text.lower() for c in r.cells]
@@ -605,7 +596,6 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             r.cells[1].text = fecha_reporte
             r.cells[3].text = fecha_reporte
 
-    # Firma del ingeniero
     archivo_firma = context.user_data.get("firma_custom")
     if not archivo_firma:
         for f_nom in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
@@ -633,7 +623,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ Reporte generado en 1 sola hoja exacta con formato limpio y marcas precisas."
+            caption="✅ Reporte generado al instante con la plantilla corregida."
         )
 
     return ConversationHandler.END
@@ -647,10 +637,8 @@ def main():
     t = threading.Thread(target=iniciar_servidor_web, daemon=True)
     t.start()
 
-    # Cargar base de datos local y sincronizar en segundo plano
-    cargar_cache_local()
-    t_sync = threading.Thread(target=actualizar_sheets_fondo, daemon=True)
-    t_sync.start()
+    # Carga local inmediata sin llamadas de red obligatorias
+    cargar_base_clientes()
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
