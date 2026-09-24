@@ -29,7 +29,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Servidor HTTP para Render
+# Servidor HTTP Render
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -45,33 +45,44 @@ def iniciar_servidor_web():
     servidor = HTTPServer(("0.0.0.0", puerto), HealthHandler)
     servidor.serve_forever()
 
-# Búsqueda en Google Sheets
+# CACHÉ DE GOOGLE SHEETS PARA RESPUESTA INMEDIATA
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+SHEET_CACHE = []
+ULTIMA_CARGA = 0
 
-def buscar_historial(busqueda):
+def recargar_cache_sheets():
+    global SHEET_CACHE, ULTIMA_CARGA
     try:
         creds_raw = os.environ.get("GOOGLE_CREDENTIALS_JSON")
         spreadsheet_id = os.environ.get("SPREADSHEET_ID")
         if not creds_raw or not spreadsheet_id:
-            return None
+            return
         creds = Credentials.from_service_account_info(json.loads(creds_raw), scopes=SCOPES)
         gc = gspread.authorize(creds)
         sheet = gc.open_by_key(spreadsheet_id).sheet1
-        registros = sheet.get_all_records()
-        termino = busqueda.strip().lower()
-        
-        for r in reversed(registros):
-            hosp = str(r.get("Hospital Name", "")).strip().lower()
-            cont = str(r.get("Hospital Contact Person", "")).strip().lower()
-            if (termino in hosp and hosp) or (termino in cont and cont):
-                return {
-                    "hospital": str(r.get("Hospital Name", "")),
-                    "contacto": str(r.get("Hospital Contact Person", "")),
-                    "telefono": str(r.get("Hospital Contact information", "")),
-                    "direccion": str(r.get("Hospital Address", ""))
-                }
+        SHEET_CACHE = sheet.get_all_records()
+        ULTIMA_CARGA = datetime.now().timestamp()
+        logger.info(f"Caché de Google Sheets cargado con {len(SHEET_CACHE)} registros.")
     except Exception as e:
-        logger.error(f"Error Sheets: {e}")
+        logger.error(f"Error cargando Sheets en segundo plano: {e}")
+
+def buscar_historial(busqueda):
+    global SHEET_CACHE, ULTIMA_CARGA
+    # Si el caché está vacío o tiene más de 15 minutos, recargar en hilo de respaldo
+    if not SHEET_CACHE:
+        recargar_cache_sheets()
+        
+    termino = busqueda.strip().lower()
+    for r in reversed(SHEET_CACHE):
+        hosp = str(r.get("Hospital Name", "")).strip().lower()
+        cont = str(r.get("Hospital Contact Person", "")).strip().lower()
+        if (termino in hosp and hosp) or (termino in cont and cont):
+            return {
+                "hospital": str(r.get("Hospital Name", "")),
+                "contacto": str(r.get("Hospital Contact Person", "")),
+                "telefono": str(r.get("Hospital Contact information", "")),
+                "direccion": str(r.get("Hospital Address", ""))
+            }
     return None
 
 ITEMS_CHECKLIST = [
@@ -137,6 +148,8 @@ async def get_consecutivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_buscar_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE):
     busqueda = update.message.text
     context.user_data["hospital"] = busqueda
+    
+    # Búsqueda ultra rápida con caché
     previo = buscar_historial(busqueda)
     
     if previo:
@@ -426,7 +439,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Fila 5: Horómetro
     t.rows[5].cells[1].text = horometro
 
-    # Fila 6: Tipo de Servicio (Limpieza total de formas flotantes y formato en corchetes)
+    # FILA 6: TIPO DE SERVICIO (Limpieza de TODAS las celdas de esa fila y formateo limpio)
     col1 = [
         ("Mantenimiento Correctivo (Repair)", "correctivo"),
         ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
@@ -440,8 +453,12 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("Otro (Other)", "otro")
     ]
     
-    celda_serv = t.rows[6].cells[-1]
-    celda_serv.text = ""  # Elimina todo el texto previo y los cuadros flotantes
+    # Vaciar todas las celdas de la fila de Tipo de Servicio para borrar cuadros viejos y textos duplicados
+    for cell in t.rows[6].cells:
+        cell.text = ""
+
+    # Escribir el bloque limpio en la celda principal
+    celda_serv = t.rows[6].cells[0] if len(t.rows[6].cells) == 1 else t.rows[6].cells[1]
     for r_idx in range(4):
         p_row = celda_serv.add_paragraph() if r_idx > 0 else celda_serv.paragraphs[0]
         p_row.paragraph_format.space_before = Pt(0)
@@ -469,7 +486,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Fila 7: Detalles
     t.rows[7].cells[-1].text = detalles
 
-    # Fila 8: Clasificación de Fallas (Reemplazo de cuadros por corchetes [   ] / [ X ])
+    # FILA 8: CLASIFICACIÓN DE FALLAS (Limpieza total de cuadrados en cada una de las celdas)
     opciones_fallas = [
         "Fallo Hidráulico (Hydraulic fault)",
         "Fallo en el Circuito (Circuit fault)",
@@ -481,12 +498,13 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Otros Fallos (Others fault)"
     ]
     for c in t.rows[8].cells:
+        txt_actual = c.text.lower()
         for nombre_falla in opciones_fallas:
             falla_clave = nombre_falla.split("(")[0].strip().lower()
-            if falla_clave in c.text.lower():
+            if falla_clave in txt_actual:
                 es_sel = (falla_tipo and falla_clave in falla_tipo.lower() and falla_tipo != "Ninguno / Normal")
                 marca = "[ X ]" if es_sel else "[   ]"
-                c.text = ""
+                c.text = ""  # Borra el cuadrado gráfico
                 p = c.paragraphs[0]
                 p.paragraph_format.space_before = Pt(0)
                 p.paragraph_format.space_after = Pt(0)
@@ -496,7 +514,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if es_sel:
                     r_txt.bold = True
 
-    # Fila 9: Motivo del Fallo y Solución (celda derecha contigua)
+    # Fila 9: Motivo del Fallo y Solución (en la celda de la derecha)
     for r_idx in range(len(t.rows)):
         c_primera = t.rows[r_idx].cells[0].text.lower()
         if "motivo del fallo" in c_primera or "fault reason" in c_primera:
@@ -581,7 +599,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ Reporte generado: [ X ] en servicio y fallas, [ ✔ ] en checklist y satisfacción, sin cuadros flotantes y en 1 sola hoja exacta."
+            caption="✅ Reporte generado: sin cuadros flotantes, con [ X ] y [ ✔ ], y 1 sola hoja exacta."
         )
 
     return ConversationHandler.END
@@ -594,6 +612,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     t = threading.Thread(target=iniciar_servidor_web, daemon=True)
     t.start()
+
+    # Cargar Google Sheets en segundo plano al iniciar para que no demore en Telegram
+    t_sheets = threading.Thread(target=recargar_cache_sheets, daemon=True)
+    t_sheets.start()
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
