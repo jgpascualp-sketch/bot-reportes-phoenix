@@ -45,7 +45,7 @@ def iniciar_servidor_web():
     servidor = HTTPServer(("0.0.0.0", puerto), HealthHandler)
     servidor.serve_forever()
 
-# Búsqueda en Google Sheets
+# Google Sheets Autocompletado
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 def buscar_historial(busqueda):
@@ -272,7 +272,7 @@ async def get_solucion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     markup = armar_teclado_checklist(context.user_data["checklist_seleccionados"])
     await update.message.reply_text(
-        "📋 Lista de verificación de pruebas:\nSeleccione los ítems que desea marcar con ✔ y presione 'LISTO / CONTINUAR':",
+        "📋 Lista de verificación de pruebas:\nSeleccione los ítems a marcar con [ ✔ ] y presione 'LISTO / CONTINUAR':",
         reply_markup=markup
     )
     return CHECKLIST_MENU
@@ -369,7 +369,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["moneda"] = "" if txt == "Dejar vacío" else txt
     
-    await update.message.reply_text("⏳ Procesando reporte Word con nuevo formato...")
+    await update.message.reply_text("⏳ Generando reporte exacto en 1 sola hoja...")
     
     plantilla = "1-TECHNICAL SERVICE REPORT.docx"
     if not os.path.exists(plantilla):
@@ -425,62 +425,84 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Fila 5: Horómetro
     t.rows[5].cells[1].text = horometro
 
-    # Fila 6: Tipo de Servicio (Reemplazo con casillas legibles de texto)
-    opciones_servicio = [
-        "Mantenimiento Correctivo (Repair)",
-        "Mantenimiento Preventivo (PM)",
-        "Diagnostico (Diagnostic / Inspection)",
-        "Instalación (Installation)",
-        "Entrenamiento (Operation training)",
-        "Seguimiento Tratamiento",
-        "Otro (Other)"
+    # Fila 6: Tipo de Servicio (Diseño en 2 columnas compactas en negro)
+    col1 = [
+        ("Mantenimiento Correctivo (Repair)", "correctivo"),
+        ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
+        ("Instalación (Installation)", "instal"),
+        ("Desinstalación (Uninstallation)", "desinstal")
     ]
+    col2 = [
+        ("Mantenimiento Preventivo (PM)", "preventivo"),
+        ("Entrenamiento (Operation training)", "entrenamiento"),
+        ("Seguimiento Tratamiento", "seguimiento"),
+        ("Otro (Other)", "otro")
+    ]
+    
     celda_serv = t.rows[6].cells[-1]
     celda_serv.text = ""
-    p_serv = celda_serv.paragraphs[0]
-    p_serv.paragraph_format.line_spacing = 1.15
-    for idx, op in enumerate(opciones_servicio):
-        marca = "[ ☒ ]" if op.split()[0].lower() in tipo_serv.lower() else "[    ]"
-        run = p_serv.add_run(f"{op} {marca}    ")
-        if marca == "[ ☒ ]":
-            run.bold = True
-            run.font.color.rgb = RGBColor(0, 51, 153)
-        if (idx + 1) % 2 == 0:
-            p_serv.add_run("\n")
+    for r_idx in range(4):
+        p_row = celda_serv.add_paragraph() if r_idx > 0 else celda_serv.paragraphs[0]
+        p_row.paragraph_format.space_before = Pt(0)
+        p_row.paragraph_format.space_after = Pt(0)
+        p_row.paragraph_format.line_spacing = 1.0
+        
+        # Columna Izquierda
+        op1, k1 = col1[r_idx]
+        m1 = "[ X ]" if k1 in tipo_serv.lower() else "[   ]"
+        r1 = p_row.add_run(f"{op1:<40} {m1}")
+        r1.font.size = Pt(8)
+        if m1 == "[ X ]":
+            r1.bold = True
+            
+        p_row.add_run("        ")
+        
+        # Columna Derecha
+        op2, k2 = col2[r_idx]
+        m2 = "[ X ]" if k2 in tipo_serv.lower() else "[   ]"
+        r2 = p_row.add_run(f"{op2:<35} {m2}")
+        r2.font.size = Pt(8)
+        if m2 == "[ X ]":
+            r2.bold = True
 
     # Fila 7: Detalles
     t.rows[7].cells[-1].text = detalles
 
-    # Fila 8: Clasificación de Fallas
+    # Fila 8: Clasificación de Fallas ([ X ] solo en la falla elegida)
     opciones_fallas = [
-        ["Fallo Hidráulico (Hydraulic fault)", "Fallo en el Circuito (Circuit fault)", "Fallo en parte de sangre (Bloodparts fault)", "Fallo en Software (Software fault)"],
-        ["Fallo Mecánico (Mechanical fault)", "Fallo de montaje de pieza (Assemble fault)", "Fallo de desgaste rápido de pieza", "Otros Fallos (Others fault)"]
+        "Fallo Hidráulico (Hydraulic fault)",
+        "Fallo en el Circuito (Circuit fault)",
+        "Fallo en parte de sangre (Bloodparts fault)",
+        "Fallo en Software (Software fault)",
+        "Fallo Mecánico (Mechanical fault)",
+        "Fallo de montaje de pieza (Assemble fault)",
+        "Fallo de desgaste rápido de pieza (Quick-wear part)",
+        "Otros Fallos (Others fault)"
     ]
-    # Si la tabla tiene 4 columnas en la fila de fallas
-    for fila_fallas in opciones_fallas:
-        for nombre_falla in fila_fallas:
+    for c in t.rows[8].cells:
+        for nombre_falla in opciones_fallas:
             falla_clave = nombre_falla.split("(")[0].strip().lower()
-            for c in t.rows[8].cells:
-                if falla_clave in c.text.lower():
-                    es_seleccionada = (falla_tipo and falla_clave in falla_tipo.lower())
-                    marca = "[ ☒ ]" if es_seleccionada else "[    ]"
-                    c.text = ""
-                    p = c.paragraphs[0]
-                    p.paragraph_format.line_spacing = 1.0
-                    r_txt = p.add_run(f"{nombre_falla}  {marca}")
-                    if es_seleccionada:
-                        r_txt.bold = True
-                        r_txt.font.color.rgb = RGBColor(0, 51, 153)
+            if falla_clave in c.text.lower():
+                es_sel = (falla_tipo and falla_clave in falla_tipo.lower() and falla_tipo != "Ninguno / Normal")
+                marca = "[ X ]" if es_sel else "[   ]"
+                c.text = ""
+                p = c.paragraphs[0]
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.line_spacing = 1.0
+                r_txt = p.add_run(f"{nombre_falla}  {marca}")
+                r_txt.font.size = Pt(7.5)
+                if es_sel:
+                    r_txt.bold = True
 
-    # Fila 9: Motivo del Fallo y Solución (celda al costado)
-    # Se busca la fila que contenga 'Motivo' y se escribe estrictamente en la celda derecha
+    # Fila 9: Motivo del Fallo y Solución (celda derecha contigua)
     for r_idx in range(len(t.rows)):
         c_primera = t.rows[r_idx].cells[0].text.lower()
         if "motivo del fallo" in c_primera or "fault reason" in c_primera:
             t.rows[r_idx].cells[-1].text = solucion
             break
 
-    # Fila 10: Lista de verificación (Checklist con marca al final)
+    # Fila 10: Lista de verificación (Checklist ordenado con [ ✔ ] en negro)
     for r_idx in range(len(t.rows)):
         fila_txt = " ".join([c.text.lower() for c in t.rows[r_idx].cells])
         if "apariencia" in fila_txt or "lista de verificación" in fila_txt:
@@ -489,16 +511,18 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     item_clave = item_full.split("(")[0].strip().lower()
                     if item_clave in c.text.lower():
                         es_chequeado = item_full in checklist_sel
-                        marca = "[ ✔ ]" if es_chequeado else "[    ]"
+                        marca = "[ ✔ ]" if es_chequeado else "[   ]"
                         c.text = ""
                         p = c.paragraphs[0]
+                        p.paragraph_format.space_before = Pt(0)
+                        p.paragraph_format.space_after = Pt(0)
                         p.paragraph_format.line_spacing = 1.0
                         r_item = p.add_run(f"{item_full}  {marca}")
+                        r_item.font.size = Pt(7.5)
                         if es_chequeado:
                             r_item.bold = True
-                            r_item.font.color.rgb = RGBColor(0, 128, 0)
 
-    # Fila 12: Encuesta de satisfacción
+    # Fila 12: Encuesta de satisfacción (Usando [ ✔ ] en negro)
     opciones_sat = [
         "Satisfecho (Satisfied)",
         "Relativamente satisfecho",
@@ -511,13 +535,17 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             c_sat = r.cells[-1]
             c_sat.text = ""
             p_sat = c_sat.paragraphs[0]
-            p_sat.paragraph_format.line_spacing = 1.15
+            p_sat.paragraph_format.space_before = Pt(0)
+            p_sat.paragraph_format.space_after = Pt(0)
+            p_sat.paragraph_format.line_spacing = 1.0
+            
+            p_sat.add_run("Encuesta de satisfacción (Are you satisfied with the service):\n").font.size = Pt(8)
             for sat_op in opciones_sat:
-                marca = "[ ☒ ]" if (satisfaccion and sat_op.split()[0].lower() in satisfaccion.lower()) else "[    ]"
-                r_sat = p_sat.add_run(f"{sat_op} {marca}   ")
-                if marca == "[ ☒ ]":
+                marca = "[ ✔ ]" if (satisfaccion and sat_op.split()[0].lower() in satisfaccion.lower()) else "[   ]"
+                r_sat = p_sat.add_run(f"{sat_op} {marca}    ")
+                r_sat.font.size = Pt(8)
+                if marca == "[ ✔ ]":
                     r_sat.bold = True
-                    r_sat.font.color.rgb = RGBColor(0, 51, 153)
             break
 
     # Tabla 1: Firmas y Nombres
@@ -541,7 +569,9 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cell_sig.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
         p = cell_sig.paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p.add_run().add_picture(archivo_firma, width=Inches(1.2))
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(0)
+        p.add_run().add_picture(archivo_firma, width=Inches(1.1))
 
     nombre_docx = f"Reporte_{serie if serie else 'Servicio'}_{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
     doc.save(nombre_docx)
@@ -550,7 +580,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ Reporte generado: Casillas estándar [ ☒ ], checklist con [ ✔ ] al final, motivo ubicado al costado y firma centrada."
+            caption="✅ Reporte generado: [ X ] en fallas/servicio, [ ✔ ] en verificación/satisfacción, texto en negro y 1 sola hoja exacta."
         )
 
     return ConversationHandler.END
