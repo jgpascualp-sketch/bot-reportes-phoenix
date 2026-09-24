@@ -18,6 +18,7 @@ from telegram.ext import (
 import docx
 from docx.shared import Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ALIGN_VERTICAL
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -252,7 +253,7 @@ async def get_falla_tipo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def armar_teclado_checklist(seleccionados):
     botones = []
     fila = []
-    for i, item in enumerate(ITEMS_CHECKLIST):
+    for item in ITEMS_CHECKLIST:
         marca = "✔ " if item in seleccionados else "⬜ "
         fila.append(InlineKeyboardButton(f"{marca}{item}", callback_data=f"chk_{item}"))
         if len(fila) == 2:
@@ -270,7 +271,7 @@ async def get_solucion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     markup = armar_teclado_checklist(context.user_data["checklist_seleccionados"])
     await update.message.reply_text(
-        "📋 Lista de verificación de pruebas:\nSeleccione los ítems que desea marcar con ✔ y al terminar presione 'LISTO / CONTINUAR':",
+        "📋 Lista de verificación de pruebas:\nSeleccione los ítems que desea marcar con ✔ y presione 'LISTO / CONTINUAR':",
         reply_markup=markup
     )
     return CHECKLIST_MENU
@@ -316,7 +317,7 @@ async def get_repuestos_opcion(update: Update, context: ContextTypes.DEFAULT_TYP
         return SATISFACCION
     else:
         await update.message.reply_text(
-            "Escriba los componentes en formato:\nNombre de la parte | Cantidad | Observación\n(ej: Válvula solenoide | 2 | Nueva)",
+            "Escriba los componentes en formato:\nNombre de la parte | Cantidad | Observación",
             reply_markup=ReplyKeyboardRemove()
         )
         return REPUESTOS_TEXTO
@@ -366,24 +367,23 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💵 Moneda y cobro:", reply_markup=reply_markup)
     return MONEDA
 
-def reemplazar_cuadro(texto_original, palabra_clave, simbolo="☒"):
-    """Reemplaza únicamente el cuadro adyacente a la palabra clave sin duplicar marcas"""
-    lineas = texto_original.split("\n")
-    nuevas = []
-    marcado = False
+def marcar_derecha(texto, palabra_clave, marca="☒"):
+    """Ubica la casilla a la derecha del texto correspondiente sin duplicar"""
+    lineas = texto.split("\n")
+    salida = []
+    aplicado = False
     for l in lineas:
-        if palabra_clave.lower() in l.lower() and not marcado:
-            # Reemplazar caracteres comunes de casillas cuadradas
-            for c_cuadro in ["□", "☐", "⬜", "[ ]", "[]"]:
-                if c_cuadro in l:
-                    l = l.replace(c_cuadro, simbolo, 1)
-                    marcado = True
+        if palabra_clave.lower() in l.lower() and not aplicado:
+            for s in ["□", "☐", "⬜", "[ ]", "[]"]:
+                if s in l:
+                    l = l.replace(s, marca, 1)
+                    aplicado = True
                     break
-            if not marcado:
-                l = f"{simbolo} {l}"
-                marcado = True
-        nuevas.append(l)
-    return "\n".join(nuevas)
+            if not aplicado:
+                l = f"{l} {marca}"
+                aplicado = True
+        salida.append(l)
+    return "\n".join(salida)
 
 async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
@@ -417,89 +417,116 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ingeniero = context.user_data.get("ingeniero", "Jesus Guillermo Pascual chalan")
     fecha_reporte = context.user_data.get("fecha", datetime.now().strftime("%d/%m/%Y"))
 
-    # Consecutivo
+    # Consecutivo en encabezado
     if consecutivo:
         for p in doc.paragraphs:
             if "consecutivo" in p.text.lower():
                 p.text = f"Consecutivo: {consecutivo}"
                 break
 
-    # Mapeo exacto por posición estructural de la tabla principal
     t = doc.tables[0]
     
     # Fila 0: Nombre del Cliente
-    t.rows[0].cells[1].text = hosp
-    
-    # Fila 1: Contacto (celda 1) y Teléfono (celda 3, a la derecha de la etiqueta)
-    t.rows[1].cells[1].text = contacto
-    if len(t.rows[1].cells) >= 4:
-        t.rows[1].cells[3].text = telefono
-    
+    for c in t.rows[0].cells:
+        if "hospital name" in c.text.lower():
+            continue
+        c.text = hosp
+        break
+
+    # Fila 1: Contacto y Teléfono por detección directa de encabezado
+    celdas_r1 = t.rows[1].cells
+    for i, c in enumerate(celdas_r1):
+        if "contact" in c.text.lower() and i + 1 < len(celdas_r1):
+            celdas_r1[i + 1].text = contacto
+        if "phone" in c.text.lower() and i + 1 < len(celdas_r1):
+            celdas_r1[i + 1].text = telefono
+
     # Fila 2: Dirección
-    t.rows[2].cells[1].text = direccion
-    
-    # Fila 3: Modelo (celda 1) y Versión de Software (celda 3, a la derecha de la etiqueta)
-    t.rows[3].cells[1].text = modelo
-    if len(t.rows[3].cells) >= 4:
-        t.rows[3].cells[3].text = version_sw
-        
+    for c in t.rows[2].cells:
+        if "adress" in c.text.lower() or "dirección" in c.text.lower():
+            continue
+        c.text = direccion
+        break
+
+    # Fila 3: Modelo y Versión de Software por detección directa
+    celdas_r3 = t.rows[3].cells
+    for i, c in enumerate(celdas_r3):
+        if "model" in c.text.lower() and "version" not in c.text.lower() and i + 1 < len(celdas_r3):
+            celdas_r3[i + 1].text = modelo
+        if ("version" in c.text.lower() or "operating" in c.text.lower()) and i + 1 < len(celdas_r3):
+            celdas_r3[i + 1].text = version_sw
+
     # Fila 4: Serie
-    t.rows[4].cells[1].text = serie
-    
+    for c in t.rows[4].cells:
+        if "serial" in c.text.lower():
+            continue
+        c.text = serie
+        break
+
     # Fila 5: Horómetro
-    t.rows[5].cells[1].text = horometro
-    
-    # Fila 6: Tipo de Servicio (Sustituir el cuadro por ☒)
-    c_serv = t.rows[6].cells[1]
+    for c in t.rows[5].cells:
+        if "running" in c.text.lower() or "horometro" in c.text.lower():
+            continue
+        c.text = horometro
+        break
+
+    # Fila 6: Tipo de Servicio (marcando la casilla a la derecha)
+    c_serv = t.rows[6].cells[-1] if len(t.rows[6].cells) > 1 else t.rows[6].cells[0]
     palabra_ts = tipo_serv.split()[0]
-    c_serv.text = reemplazar_cuadro(c_serv.text, palabra_ts, "☒")
-    
+    c_serv.text = marcar_derecha(c_serv.text, palabra_ts, "☒")
+
     # Fila 7: Detalles
-    t.rows[7].cells[1].text = detalles
-    
-    # Fila 8: Clasificación de fallas (Sustituir el cuadro por ☒)
+    c_det = t.rows[7].cells[-1] if len(t.rows[7].cells) > 1 else t.rows[7].cells[0]
+    c_det.text = detalles
+
+    # Fila 8: Clasificación de fallas
     if falla_tipo and falla_tipo != "Ninguno / Normal":
-        c_fallas = t.rows[8].cells[1]
-        c_fallas.text = reemplazar_cuadro(c_fallas.text, falla_tipo, "☒")
-        
+        for c in t.rows[8].cells:
+            if falla_tipo.lower() in c.text.lower():
+                c.text = marcar_derecha(c.text, falla_tipo, "☒")
+
     # Fila 9: Motivo del Fallo y Solución
-    t.rows[9].cells[1].text = solucion
-    
-    # Fila 10: Lista de verificación (Sustituir el cuadro por ☑ solo en los seleccionados)
-    c_chk = t.rows[10].cells[1]
-    for chk_item in checklist_sel:
-        c_chk.text = reemplazar_cuadro(c_chk.text, chk_item, "☑")
-        
+    c_sol = t.rows[9].cells[-1] if len(t.rows[9].cells) > 1 else t.rows[9].cells[0]
+    c_sol.text = solucion
+
+    # Fila 10: Lista de verificación (Checklist)
+    for c in t.rows[10].cells:
+        for chk in checklist_sel:
+            if chk.lower() in c.text.lower():
+                c.text = marcar_derecha(c.text, chk, "☑")
+
     # Fila 11: Reemplazo de componentes
     if repuestos_txt:
-        t.rows[11].cells[1].text = repuestos_txt
+        c_rep = t.rows[11].cells[-1] if len(t.rows[11].cells) > 1 else t.rows[11].cells[0]
+        c_rep.text = repuestos_txt
 
-    # Fila 12: Encuesta de satisfacción (Sustituir el cuadro por ☒)
+    # Fila 12: Encuesta de satisfacción
     if satisfaccion:
-        c_sat = t.rows[12].cells[1]
+        c_sat = t.rows[12].cells[-1] if len(t.rows[12].cells) > 1 else t.rows[12].cells[0]
         palabra_sat = satisfaccion.split()[0]
-        c_sat.text = reemplazar_cuadro(c_sat.text, palabra_sat, "☒")
+        c_sat.text = marcar_derecha(c_sat.text, palabra_sat, "☒")
 
-    # Tabla 1: Firmas y Validaciones
+    # Tabla 1: Firmas y Nombres
     t2 = doc.tables[1]
     t2.rows[0].cells[1].text = contacto
     t2.rows[0].cells[3].text = ingeniero
     t2.rows[2].cells[1].text = fecha_reporte
     t2.rows[2].cells[3].text = fecha_reporte
-    
-    # Inserción y centrado de la firma del ingeniero
+
+    # Firma del ingeniero: centrada vertical y horizontalmente
     archivo_firma = None
     for f_nom in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
         if os.path.exists(f_nom):
             archivo_firma = f_nom
             break
-            
+
     if archivo_firma:
         cell_sig = t2.rows[1].cells[3]
         cell_sig.text = ""
+        cell_sig.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
         p = cell_sig.paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p.add_run().add_picture(archivo_firma, width=Inches(1.1))
+        p.add_run().add_picture(archivo_firma, width=Inches(1.2))
 
     nombre_docx = f"Reporte_{serie if serie else 'Servicio'}_{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
     doc.save(nombre_docx)
@@ -508,7 +535,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ Reporte generado: formato original respetado, celdas corregidas y marcas exactas."
+            caption="✅ Reporte generado: celdas alineadas, marcas a la derecha y firma centrada."
         )
 
     return ConversationHandler.END
