@@ -19,8 +19,6 @@ import docx
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
-from docx.oxml import parse_xml
-from docx.oxml.ns import nsdecls
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -29,7 +27,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Servidor HTTP Render
+# Servidor HTTP para Render
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -45,21 +43,20 @@ def iniciar_servidor_web():
     servidor = HTTPServer(("0.0.0.0", puerto), HealthHandler)
     servidor.serve_forever()
 
-# BASE LOCAL DE CLIENTES PARA BÚSQUEDA INSTANTÁNEA (SIN DEMORA DE RED)
+# CACHÉ LOCAL RÁPIDO PARA RESPUESTAS INSTANTÁNEAS
 CACHE_FILE = "clientes_cache.json"
 MEMORIA_CLIENTES = []
 
-def cargar_cache():
+def cargar_cache_local():
     global MEMORIA_CLIENTES
     if os.path.exists(CACHE_FILE):
         try:
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
                 MEMORIA_CLIENTES = json.load(f)
         except Exception as e:
-            logger.error(f"Error cargando base local: {e}")
+            logger.error(f"Error leyendo clientes_cache.json: {e}")
 
-def actualizar_cache_sheets():
-    """Actualiza en segundo plano sin trabar el bot"""
+def actualizar_sheets_fondo():
     global MEMORIA_CLIENTES
     try:
         creds_raw = os.environ.get("GOOGLE_CREDENTIALS_JSON")
@@ -76,9 +73,9 @@ def actualizar_cache_sheets():
                 MEMORIA_CLIENTES = data
                 with open(CACHE_FILE, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False)
-                logger.info("Base de clientes actualizada con éxito en segundo plano.")
+                logger.info("Caché de clientes actualizado desde Sheets.")
     except Exception as e:
-        logger.error(f"Sincronización de fondo omitida: {e}")
+        logger.error(f"Sincronización en segundo plano: {e}")
 
 def buscar_historial_inmediato(busqueda):
     termino = busqueda.strip().lower()
@@ -104,7 +101,7 @@ ITEMS_CHECKLIST = [
     "Parametros de Tratamiento",
     "Sim. de Tratamiento (Simulation treatme)",
     "Opciones (Options)",
-    "Sensor de Cond (Conductivity sensor)",
+    "Sensor de Cond. (Conductivity sensor)",
     "Bomba Ceramica (Ceramic pump)",
     "Bomba de Heparina (Syringe pump)",
     "Calibración de Conductividad",
@@ -158,15 +155,13 @@ async def get_buscar_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE)
     busqueda = update.message.text
     context.user_data["hospital"] = busqueda
     
-    # Búsqueda local instantánea (sin demora de red)
     previo = buscar_historial_inmediato(busqueda)
-    
     if previo:
         context.user_data["sug_data"] = previo
         teclado = [["✅ Sí, autocompletar"], ["✏️ No, ingresar manual"]]
         reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
         await update.message.reply_text(
-            f"💡 Historial encontrado:\n"
+            f"💡 Datos encontrados en historial:\n"
             f"🏥 Clínica: {previo['hospital']}\n"
             f"👤 Contacto: {previo['contacto']}\n"
             f"📞 Teléfono: {previo['telefono']}\n"
@@ -240,7 +235,7 @@ async def get_version_sw(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ["Instalación (Installation)"],
         ["Diagnostico (Diagnostic / Inspection)"],
         ["Entrenamiento (Operation training)"],
-        ["Seguimiento Tratamiento"],
+        ["Seguimiento Tratamiento (Follow-up Trearment)"],
         ["Desinstalación (Uninstallation)"],
         ["Otro (Other)"]
     ]
@@ -388,24 +383,19 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💵 Moneda y cobro:", reply_markup=reply_markup)
     return MONEDA
 
-def limpiar_formas_graficas_de_celda(celda):
-    """Elimina formas de dibujo, marcos flotantes y caracteres extraños de la celda"""
-    tc_elem = celda._tc
-    # Eliminar dibujos vectoriales flotantes (DrawingML y VML shapes)
-    for elem in tc_elem.xpath('.//*[local-name()="drawing" or local-name()="pict" or local-name()="shape"]'):
-        elem.getparent().remove(elem)
-    # Limpiar texto de párrafos existentes
-    celda.text = ""
-
 async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["moneda"] = "" if txt == "Dejar vacío" else txt
     
-    await update.message.reply_text("⏳ Generando reporte exacto en 1 sola hoja...")
+    await update.message.reply_text("⏳ Procesando reporte en la plantilla corregida...")
     
-    plantilla = "1-TECHNICAL SERVICE REPORT.docx"
+    # Archivo corregido
+    plantilla = "1-TECHNICAL SERVICE REPORT corregido.docx"
     if not os.path.exists(plantilla):
-        await update.message.reply_text("⚠️ No se encontró la plantilla .docx.")
+        plantilla = "1-TECHNICAL SERVICE REPORT.docx"
+
+    if not os.path.exists(plantilla):
+        await update.message.reply_text("⚠️ No se encontró la plantilla .docx en el servidor.")
         return ConversationHandler.END
 
     doc = docx.Document(plantilla)
@@ -428,47 +418,55 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ingeniero = context.user_data.get("ingeniero", "Jesus Guillermo Pascual chalan")
     fecha_reporte = context.user_data.get("fecha", datetime.now().strftime("%d/%m/%Y"))
 
-    # Consecutivo
-    if consecutivo:
-        for p in doc.paragraphs:
-            if "consecutivo" in p.text.lower():
-                p.text = f"Consecutivo: {consecutivo}"
-                break
-
     t = doc.tables[0]
 
-    # Fila 0: Hospital
-    t.rows[0].cells[1].text = hosp
+    # Consecutivo
+    if consecutivo:
+        for r in t.rows[:2]:
+            for c in r.cells:
+                if "consecutivo" in c.text.lower():
+                    c.text = f"Consecutivo (Consecutive)\n{consecutivo}"
+                    break
 
-    # Fila 1: Contacto y Teléfono
-    t.rows[1].cells[1].text = contacto
-    t.rows[1].cells[-1].text = telefono
+    # 1. Datos del cliente y equipo
+    for r in t.rows:
+        txt_fila = [c.text.strip().lower() for c in r.cells]
+        
+        # Hospital Name
+        if any("hospital name" in x for x in txt_fila):
+            r.cells[1].text = hosp
+            
+        # Contacto y Teléfono
+        if any("contact" in x for x in txt_fila) and any("phone" in x for x in txt_fila):
+            r.cells[1].text = contacto
+            r.cells[-1].text = telefono
+            
+        # Dirección
+        if any("adress" in x or "dirección" in x for x in txt_fila):
+            r.cells[1].text = direccion
+            
+        # Modelo y Versión de Software
+        if any("model" in x for x in txt_fila) and any("version" in x for x in txt_fila):
+            r.cells[1].text = modelo
+            r.cells[-1].text = version_sw
+            
+        # Serie
+        if any("serial no" in x for x in txt_fila):
+            r.cells[1].text = serie
+            
+        # Horómetro
+        if any("running" in x or "horometro" in x for x in txt_fila):
+            r.cells[1].text = horometro
 
-    # Fila 2: Dirección
-    t.rows[2].cells[1].text = direccion
+        # Detalles
+        if any("feedback details" in x or "detalles" in x for x in txt_fila):
+            r.cells[-1].text = detalles
 
-    # Fila 3: Modelo y Versión de Software
-    t.rows[3].cells[1].text = modelo
-    t.rows[3].cells[-1].text = version_sw
+        # Motivo y Solución
+        if any("motivo del fallo" in x or "fault reason" in x for x in txt_fila):
+            r.cells[-1].text = solucion
 
-    # Fila 4: Serie
-    t.rows[4].cells[1].text = serie
-
-    # Fila 5: Horómetro
-    t.rows[5].cells[1].text = horometro
-
-    # --- FILA 6: TIPO DE SERVICIO (DESTRUCCIÓN TOTAL DE CUADROS FLOTANTES Y DISEÑO LIMPIO) ---
-    fila_serv = t.rows[6]
-    for cell in fila_serv.cells:
-        limpiar_formas_graficas_de_celda(cell)
-
-    # Celda izquierda: Título exacto
-    fila_serv.cells[0].text = "Tipo de Servicio\n(Service Type)"
-    p_tit = fila_serv.cells[0].paragraphs[0]
-    p_tit.paragraph_format.space_before = Pt(2)
-    p_tit.paragraph_format.space_after = Pt(2)
-
-    # Celda derecha: Dos columnas perfectas con corchetes
+    # 2. Tipo de Servicio: rellenar las dos columnas simétricas con [   ] o [ X ]
     col1 = [
         ("Mantenimiento Correctivo (Repair)", "correctivo"),
         ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
@@ -478,134 +476,134 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     col2 = [
         ("Mantenimiento Preventivo (PM)", "preventivo"),
         ("Entrenamiento (Operation training)", "entrenamiento"),
-        ("Seguimiento Tratamiento", "seguimiento"),
+        ("Seguimiento Tratamiento (Follow-up Trearment)", "seguimiento"),
         ("Otro (Other)", "otro")
     ]
 
-    celda_datos = fila_serv.cells[-1]
-    for r_idx in range(4):
-        p_row = celda_datos.add_paragraph() if r_idx > 0 else celda_datos.paragraphs[0]
-        p_row.paragraph_format.space_before = Pt(0)
-        p_row.paragraph_format.space_after = Pt(0)
-        p_row.paragraph_format.line_spacing = 1.0
+    for r in t.rows:
+        if any("service type" in c.text.lower() or "tipo de servicio" in c.text.lower() for c in r.cells):
+            # Celda izquierda de opciones
+            c_izq = r.cells[1]
+            c_izq.text = ""
+            for idx, (op, clave) in enumerate(col1):
+                p = c_izq.add_paragraph() if idx > 0 else c_izq.paragraphs[0]
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.line_spacing = 1.0
+                sel = clave in tipo_serv.lower()
+                marca = "[ X ]" if sel else "[   ]"
+                run = p.add_run(f"{op}  {marca}")
+                run.font.size = Pt(8)
+                if sel:
+                    run.bold = True
 
-        # Mitad izquierda
-        op1, k1 = col1[r_idx]
-        sel1 = k1 in tipo_serv.lower()
-        m1 = "[ X ]" if sel1 else "[   ]"
-        r1 = p_row.add_run(f"{op1:<42} {m1}")
-        r1.font.size = Pt(8.5 if sel1 else 8)
-        if sel1:
-            r1.bold = True
+            # Celda derecha de opciones
+            c_der = r.cells[-1]
+            c_der.text = ""
+            for idx, (op, clave) in enumerate(col2):
+                p = c_der.add_paragraph() if idx > 0 else c_der.paragraphs[0]
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.line_spacing = 1.0
+                sel = clave in tipo_serv.lower()
+                marca = "[ X ]" if sel else "[   ]"
+                run = p.add_run(f"{op}  {marca}")
+                run.font.size = Pt(8)
+                if sel:
+                    run.bold = True
+            break
 
-        p_row.add_run("       ")
+    # 3. Clasificación de Fallas: escribir el corchete [ X ] en la falla seleccionada
+    fallas_lista = [
+        ("Fallo Hidaulico\n(Hydraulic fault)", "hidráulico", "hidraulico"),
+        ("Fallo en el Circuito\n(Circuit fault)", "circuito"),
+        ("Fallo en parte de sangre\n(Bloodparts fault)", "sangre"),
+        ("Fallo en Software\n(Software fault)", "software"),
+        ("Fallo Mecanico\n(Mechanical fault)", "mecánico", "mecanico"),
+        ("Fallo de montaje de pieza\n(Assemble fault)", "montaje"),
+        ("Fallo de desgaste rápido de pieza\n(Quick-wear part)", "desgaste"),
+        ("Otros Fallos\n(Others fault)", "otros")
+    ]
 
-        # Mitad derecha
-        op2, k2 = col2[r_idx]
-        sel2 = k2 in tipo_serv.lower()
-        m2 = "[ X ]" if sel2 else "[   ]"
-        r2 = p_row.add_run(f"{op2:<35} {m2}")
-        r2.font.size = Pt(8.5 if sel2 else 8)
-        if sel2:
-            r2.bold = True
-
-    # Fila 7: Detalles
-    t.rows[7].cells[-1].text = detalles
-
-    # --- FILA 8: CLASIFICACIÓN DE FALLAS (ELIMINACIÓN DE TODOS LOS CUADROS EN CADA CELDA) ---
-    fallas_map = {
-        "hidráulico": "Fallo Hidráulico (Hydraulic fault)",
-        "hidraulico": "Fallo Hidráulico (Hydraulic fault)",
-        "circuito": "Fallo en el Circuito (Circuit fault)",
-        "sangre": "Fallo en parte de sangre (Bloodparts fault)",
-        "software": "Fallo en Software (Software fault)",
-        "mecánico": "Fallo Mecánico (Mechanical fault)",
-        "mecanico": "Fallo Mecánico (Mechanical fault)",
-        "montaje": "Fallo de montaje de pieza (Assemble fault)",
-        "desgaste": "Fallo de desgaste rápido de pieza (Quick-wear part)",
-        "otros": "Otros Fallos (Others fault)"
-    }
-
-    # Limpiar y reescribir todas las celdas de fallas
-    for r_idx in range(len(t.rows)):
-        txt_f = " ".join([c.text.lower() for c in t.rows[r_idx].cells])
-        if "clasificación de fallas" in txt_f or "fault classification" in txt_f or "hidraulico" in txt_f or "mecanico" in txt_f:
-            for c in t.rows[r_idx].cells:
+    for r in t.rows:
+        txt_r = " ".join([c.text.lower() for c in r.cells])
+        if "hydraulic" in txt_r or "mechanical" in txt_r or "clasificación de fallas" in txt_r:
+            for c in r.cells:
                 txt_c = c.text.lower()
-                for k_falla, nombre_falla in fallas_map.items():
-                    if k_falla in txt_c:
-                        es_sel = (falla_tipo and k_falla in falla_tipo.lower() and falla_tipo != "Ninguno / Normal")
+                for item in fallas_lista:
+                    nombre = item[0]
+                    claves = item[1:]
+                    if any(k in txt_c for k in claves):
+                        es_sel = (falla_tipo and any(k in falla_tipo.lower() for k in claves) and falla_tipo != "Ninguno / Normal")
                         marca = "[ X ]" if es_sel else "[   ]"
-                        limpiar_formas_graficas_de_celda(c)
+                        c.text = ""
                         p = c.paragraphs[0]
                         p.paragraph_format.space_before = Pt(0)
                         p.paragraph_format.space_after = Pt(0)
                         p.paragraph_format.line_spacing = 1.0
-                        r_txt = p.add_run(f"{nombre_falla}  {marca}")
-                        r_txt.font.size = Pt(8.5 if es_sel else 7.5)
+                        run = p.add_run(f"{nombre}  {marca}")
+                        run.font.size = Pt(7.5)
                         if es_sel:
-                            r_txt.bold = True
+                            run.bold = True
                         break
 
-    # Fila 9: Motivo del Fallo y Solución (celda contigua)
-    for r_idx in range(len(t.rows)):
-        c_primera = t.rows[r_idx].cells[0].text.lower()
-        if "motivo del fallo" in c_primera or "fault reason" in c_primera:
-            t.rows[r_idx].cells[-1].text = solucion
-            break
-
-    # Fila 10: Lista de verificación (Checklist con [ ✔ ] al final)
-    for r_idx in range(len(t.rows)):
-        fila_txt = " ".join([c.text.lower() for c in t.rows[r_idx].cells])
-        if "apariencia" in fila_txt or "lista de verificación" in fila_txt:
-            for c in t.rows[r_idx].cells:
+    # 4. Lista de Verificación: marcar con [ ✔ ] al final solo los elegidos
+    for r in t.rows:
+        txt_r = " ".join([c.text.lower() for c in r.cells])
+        if "apariencia" in txt_r or "pantalla táctil" in txt_r or "lista de verificación" in txt_r:
+            for c in r.cells:
+                txt_c = c.text.lower()
                 for item_full in ITEMS_CHECKLIST:
                     item_clave = item_full.split("(")[0].strip().lower()
-                    if item_clave in c.text.lower():
-                        es_chequeado = item_full in checklist_sel
-                        marca = "[ ✔ ]" if es_chequeado else "[   ]"
-                        limpiar_formas_graficas_de_celda(c)
+                    if item_clave in txt_c:
+                        es_chk = item_full in checklist_sel
+                        marca = "[ ✔ ]" if es_chk else "[   ]"
+                        c.text = ""
                         p = c.paragraphs[0]
                         p.paragraph_format.space_before = Pt(0)
                         p.paragraph_format.space_after = Pt(0)
                         p.paragraph_format.line_spacing = 1.0
-                        r_item = p.add_run(f"{item_full}  {marca}")
-                        r_item.font.size = Pt(7.5)
-                        if es_chequeado:
-                            r_item.bold = True
+                        run = p.add_run(f"{item_full}  {marca}")
+                        run.font.size = Pt(7.5)
+                        if es_chk:
+                            run.bold = True
+                        break
 
-    # Fila 12: Encuesta de satisfacción
+    # 5. Encuesta de Satisfacción (con [ ✔ ] al final)
     opciones_sat = [
-        "Satisfecho (Satisfied)",
+        "Satisfecho (Satisfield)",
         "Relativamente satisfecho",
         "Normal (Normal)",
-        "Insatisfecho (Dissatisfied)",
-        "Muy Insatisfecho (Very Dissatisfied)"
+        "Insatisfecho (Dissatisfield)",
+        "Muy Insatisfecho (Very Dissatisfield)"
     ]
     for r in t.rows:
-        if any("encuesta de satisfacción" in c.text.lower() or "satisfaction" in c.text.lower() for c in r.cells):
+        if any("satisfaction" in c.text.lower() or "satisfacción" in c.text.lower() for c in r.cells):
             c_sat = r.cells[-1]
-            limpiar_formas_graficas_de_celda(c_sat)
-            p_sat = c_sat.paragraphs[0]
-            p_sat.paragraph_format.space_before = Pt(0)
-            p_sat.paragraph_format.space_after = Pt(0)
-            p_sat.paragraph_format.line_spacing = 1.0
-
-            p_sat.add_run("Encuesta de satisfacción (Are you satisfied with the service):\n").font.size = Pt(8)
+            c_sat.text = ""
+            p = c_sat.paragraphs[0]
+            p.paragraph_format.space_before = Pt(0)
+            p.paragraph_format.space_after = Pt(0)
+            p.paragraph_format.line_spacing = 1.0
+            p.add_run("Encuesta de satisfacción (Are you satisfield with the service):\n").font.size = Pt(8)
             for sat_op in opciones_sat:
                 marca = "[ ✔ ]" if (satisfaccion and sat_op.split()[0].lower() in satisfaccion.lower()) else "[   ]"
-                r_sat = p_sat.add_run(f"{sat_op} {marca}    ")
-                r_sat.font.size = Pt(8)
+                run = p.add_run(f"{sat_op} {marca}    ")
+                run.font.size = Pt(8)
                 if marca == "[ ✔ ]":
-                    r_sat.bold = True
+                    run.bold = True
             break
 
-    # Tabla 1: Firmas y Nombres
-    t2 = doc.tables[1]
-    t2.rows[0].cells[1].text = contacto
-    t2.rows[0].cells[3].text = ingeniero
-    t2.rows[2].cells[1].text = fecha_reporte
-    t2.rows[2].cells[3].text = fecha_reporte
+    # 6. Tabla de Firmas
+    t_firmas = doc.tables[1] if len(doc.tables) > 1 else t
+    for r in t_firmas.rows:
+        txt_r = [c.text.lower() for c in r.cells]
+        if any("customer name" in x for x in txt_r) or any("nombre del cliente" in x for x in txt_r):
+            r.cells[1].text = contacto
+            r.cells[3].text = ingeniero
+        if any("signature date" in x for x in txt_r) or any("fecha de firma" in x for x in txt_r):
+            r.cells[1].text = fecha_reporte
+            r.cells[3].text = fecha_reporte
 
     # Firma del ingeniero
     archivo_firma = context.user_data.get("firma_custom")
@@ -616,14 +614,17 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
 
     if archivo_firma and os.path.exists(archivo_firma):
-        cell_sig = t2.rows[1].cells[3]
-        cell_sig.text = ""
-        cell_sig.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-        p = cell_sig.paragraphs[0]
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p.paragraph_format.space_before = Pt(0)
-        p.paragraph_format.space_after = Pt(0)
-        p.add_run().add_picture(archivo_firma, width=Inches(1.1))
+        for r in t_firmas.rows:
+            if any("engineer signature" in c.text.lower() or "firma" in c.text.lower() for c in r.cells):
+                cell_sig = r.cells[3]
+                cell_sig.text = ""
+                cell_sig.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                p = cell_sig.paragraphs[0]
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(0)
+                p.add_run().add_picture(archivo_firma, width=Inches(1.1))
+                break
 
     nombre_docx = f"Reporte_{serie if serie else 'Servicio'}_{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
     doc.save(nombre_docx)
@@ -632,7 +633,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ Reporte generado: cero cuadros flotantes, formato limpio en corchetes y 1 sola hoja."
+            caption="✅ Reporte generado en 1 sola hoja exacta con formato limpio y marcas precisas."
         )
 
     return ConversationHandler.END
@@ -646,11 +647,9 @@ def main():
     t = threading.Thread(target=iniciar_servidor_web, daemon=True)
     t.start()
 
-    # Cargar base de datos local en memoria
-    cargar_cache()
-
-    # Sincronización en segundo plano con Sheets
-    t_sync = threading.Thread(target=actualizar_cache_sheets, daemon=True)
+    # Cargar base de datos local y sincronizar en segundo plano
+    cargar_cache_local()
+    t_sync = threading.Thread(target=actualizar_sheets_fondo, daemon=True)
     t_sync.start()
 
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
