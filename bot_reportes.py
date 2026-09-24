@@ -231,7 +231,7 @@ async def checklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.message.reply_text(f"✅ Se seleccionaron {len(sel)} ítems.")
         teclado = [["Omitir / Todo Vacío"], ["Dejar vacío"]]
         reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-        await query.message.reply_text("⚙️ Registro de componentes:\nIngrese Nombre de la parte (Component name):", reply_markup=reply_markup)
+        await query.message.reply_text("⚙️ Registro de componentes:\nIngrese Nombre de la parte (o pulse Omitir):", reply_markup=reply_markup)
         return REP_PARTE
         
     elif data == "chk_ALL":
@@ -358,14 +358,14 @@ def escribir_con_espacio(celda, texto, negrita=False):
     if negrita:
         run.bold = True
 
-def quitar_linea_vertical(celda_izq, celda_der):
-    """Elimina la línea divisoria vertical entre dos celdas contiguas"""
+def eliminar_linea_vertical(celda_izq, celda_der):
+    """Elimina explícitamente la línea vertical entre ambas celdas asignando w:val='nil'"""
     tcPr_i = celda_izq._tc.get_or_add_tcPr()
     tcPr_d = celda_der._tc.get_or_add_tcPr()
-    border_none_r = parse_xml(f'<w:tcBorders {nsdecls("w")}><w:right w:val="none"/></w:tcBorders>')
-    border_none_l = parse_xml(f'<w:tcBorders {nsdecls("w")}><w:left w:val="none"/></w:tcBorders>')
-    tcPr_i.append(border_none_r)
-    tcPr_d.append(border_none_l)
+    border_right_nil = parse_xml(f'<w:tcBorders {nsdecls("w")}><w:right w:val="nil"/></w:tcBorders>')
+    border_left_nil = parse_xml(f'<w:tcBorders {nsdecls("w")}><w:left w:val="nil"/></w:tcBorders>')
+    tcPr_i.append(border_right_nil)
+    tcPr_d.append(border_left_nil)
 
 async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -431,7 +431,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if any("running" in x or "horometro" in x for x in txt_fila):
                 escribir_con_espacio(r.cells[1], horometro)
                 
-            # Detalles
+            # Detalles centrado
             if any("feedback details" in x or "detalles" in x for x in txt_fila):
                 r.cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 r.cells[0].text = ""
@@ -445,7 +445,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if any("motivo del fallo" in x or "fault reason" in x for x in txt_fila):
                 escribir_con_espacio(r.cells[-1], solucion)
 
-        # 2. Tipo de Servicio (Título en celda izquierda arriba y línea vertical oculta)
+        # 2. Tipo de Servicio (Título en celda izquierda y línea divisoria vertical eliminada)
         col1 = [
             ("Mantenimiento Correctivo (Repair)", "correctivo"),
             ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
@@ -464,8 +464,8 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 c_izq = r.cells[0] if len(r.cells) == 2 else r.cells[1]
                 c_der = r.cells[-1]
                 
-                # Quitar línea vertical entre izquierda y derecha
-                quitar_linea_vertical(c_izq, c_der)
+                # Quitar línea vertical divisoria
+                eliminar_linea_vertical(c_izq, c_der)
                 
                 # Columna Izquierda con título arriba
                 c_izq.text = ""
@@ -488,12 +488,12 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if sel:
                         run.bold = True
 
-                # Columna Derecha con espaciado superior idéntico
+                # Columna Derecha con espaciado idéntico
                 c_der.text = ""
                 p_d_top = c_der.paragraphs[0]
                 p_d_top.paragraph_format.space_before = Pt(0)
                 p_d_top.paragraph_format.space_after = Pt(2)
-                p_d_top.add_run("\n").font.size = Pt(8.5)  # Espacio simétrico al título
+                p_d_top.add_run("\n").font.size = Pt(8.5)
                 
                 for idx, (op, clave) in enumerate(col2):
                     p = c_der.add_paragraph()
@@ -508,7 +508,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         run.bold = True
                 break
 
-        # 3. Clasificación de Fallas (Nombres literales de la plantilla)
+        # 3. Clasificación de Fallas
         fallas_lista = [
             ("Fallo Hidaulico\n(Hydraulic fault)", ["hidaulico", "hydraulic fault", "hidráulico", "hidraulico"]),
             ("Fallo en el Circuito\n(Circuit fault)", ["circuito", "circuit fault"]),
@@ -580,7 +580,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 run.bold = True
                             break
 
-        # 5. Registro de Componentes (Fila exacta debajo de Nombre de la parte | Cantidad | Observación)
+        # 5. Registro de Componentes (Columna 2: Nombre de la parte, Columna 3: Cantidad, Columna 4: Observación)
         if rep_p or rep_c or rep_o:
             idx_head = None
             for i_r, r_obj in enumerate(t.rows):
@@ -591,8 +591,19 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if idx_head is not None and idx_head + 1 < len(t.rows):
                 fila_datos = t.rows[idx_head + 1]
-                # Escribir en las 3 columnas de datos directas
-                if len(fila_datos.cells) >= 3:
+                # En la tabla de 4 columnas:
+                # cells[0] = Registro de reemplazo de componentes (conserva su título)
+                # cells[1] = Nombre de la parte
+                # cells[2] = Cantidad
+                # cells[3] = Observación
+                if len(fila_datos.cells) >= 4:
+                    if rep_p:
+                        escribir_con_espacio(fila_datos.cells[1], rep_p)
+                    if rep_c:
+                        escribir_con_espacio(fila_datos.cells[2], rep_c)
+                    if rep_o:
+                        escribir_con_espacio(fila_datos.cells[3], rep_o)
+                elif len(fila_datos.cells) == 3:
                     if rep_p:
                         escribir_con_espacio(fila_datos.cells[0], rep_p)
                     if rep_c:
@@ -626,7 +637,15 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         run.bold = True
                 break
 
-        # 7. Firmas
+        # 7. Monto de dinero y Moneda (Quitar línea vertical intermedia)
+        for r in t.rows:
+            txt_row = " ".join([c.text.lower() for c in r.cells])
+            if "monto de dinero" in txt_row or "amount of money" in txt_row:
+                if len(r.cells) >= 2:
+                    eliminar_linea_vertical(r.cells[0], r.cells[-1])
+                break
+
+        # 8. Firmas
         t_firmas = doc.tables[1] if len(doc.tables) > 1 else t
         for r in t_firmas.rows:
             txt_r = [c.text.lower() for c in r.cells]
