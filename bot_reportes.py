@@ -332,7 +332,7 @@ async def get_ingeniero(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_opcion_firma(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     if "Subir Foto" in txt:
-        await update.message.reply_text("📸 Por favor envíe la FOTO de la firma como imagen:", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text("📸 Envíe la FOTO de la firma:", reply_markup=ReplyKeyboardRemove())
         return SUBIR_FIRMA
     
     context.user_data["firma_custom"] = None
@@ -351,7 +351,7 @@ async def get_foto_firma(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
     teclado = [[fecha_hoy], ["Ingresar otra fecha"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("✅ Firma guardada. 📅 Confirme la fecha del reporte:", reply_markup=reply_markup)
+    await update.message.reply_text("✅ Firma recibida. 📅 Confirme la fecha del reporte:", reply_markup=reply_markup)
     return FECHA
 
 async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -366,54 +366,42 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💵 Moneda y cobro:", reply_markup=reply_markup)
     return MONEDA
 
-def marcar_cuadro_en_parrafo(parrafo, palabra_clave, simbolo="☒"):
-    """Reemplaza caracteres de checkbox vacíos por el símbolo deseado o activa checkbox de formulario XML"""
+def marcar_cuadro_exacto(celda, palabra_clave, simbolo="☒"):
+    """
+    Busca la palabra clave en la celda y transforma el cuadrito asociado
+    en el símbolo deseado (☒ para X, ☑ para check) sin reescribir ni mover la celda.
+    """
     clave = palabra_clave.lower().strip()
-    if clave not in parrafo.text.lower():
-        return False
-        
-    # 1. Chequear si contiene controles de formulario XML w:checkBox
-    cbs = parrafo._element.xpath('.//w:checkBox')
-    if cbs:
-        for cb in cbs:
-            chk_elm = cb.find(qn('w:checked'))
-            if chk_elm is None:
-                chk_elm = OxmlElement('w:checked')
-                cb.append(chk_elm)
-            chk_elm.set(qn('w:val'), "1")
-        return True
-
-    # 2. Chequear si contiene controles w14:checkbox
-    cbs14 = parrafo._element.xpath('.//w14:checkbox')
-    if cbs14:
-        for cb in cbs14:
-            chk14 = cb.find(qn('w14:checked'))
-            if chk14 is None:
-                chk14 = OxmlElement('w14:checked')
-                cb.append(chk14)
-            chk14.set(qn('w14:val'), "1")
-        return True
-
-    # 3. Sustitución de caracteres gráficos en runs
-    cajas = ["□", "☐", "⬜", "[ ]", "[]", "\u25a1", "\u25fb", "\u2610", "", "o"]
-    for r in parrafo.runs:
-        for cj in cajas:
-            if cj in r.text:
-                r.text = r.text.replace(cj, simbolo, 1)
+    cajas = ["□", "☐", "⬜", "[ ]", "[]", "\u25a1", "\u25fb", "\u2610", "\uf06f", "o"]
+    
+    for p in celda.paragraphs:
+        if clave in p.text.lower():
+            # 1. Controles w:checkBox / w14:checkbox XML
+            for cb in p._element.xpath('.//w:checkBox | .//w14:checkbox'):
+                chk = cb.find(qn('w:checked')) or cb.find(qn('w14:checked'))
+                if chk is None:
+                    chk = OxmlElement('w:checked')
+                    cb.append(chk)
+                chk.set(qn('w:val'), "1")
                 return True
                 
-    # 4. Sustitución a nivel de párrafo si los runs vinieron divididos
-    for cj in cajas:
-        if cj in parrafo.text:
-            parrafo.text = parrafo.text.replace(cj, simbolo, 1)
+            # 2. Reemplazo en los runs del párrafo para preservar fuente y espaciado
+            for r in p.runs:
+                for cj in cajas:
+                    if cj in r.text:
+                        r.text = r.text.replace(cj, simbolo, 1)
+                        return True
+                        
+            # 3. Si el carácter de caja estaba en el párrafo general
+            for cj in cajas:
+                if cj in p.text:
+                    p.text = p.text.replace(cj, simbolo, 1)
+                    return True
+                    
+            # 4. Respaldo: agregar el símbolo al inicio de la línea sin descuadrar
+            p.text = f"{simbolo} {p.text.strip()}"
             return True
-
-    return False
-
-def marcar_en_celda(celda, palabra_clave, simbolo="☒"):
-    for p in celda.paragraphs:
-        if marcar_cuadro_en_parrafo(p, palabra_clave, simbolo):
-            return True
+            
     return False
 
 async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -427,6 +415,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ No se encontró la plantilla .docx.")
         return ConversationHandler.END
 
+    # Cargar plantilla limpia para preservar diseño original intacto
     doc = docx.Document(plantilla)
     
     consecutivo = context.user_data.get("consecutivo", "")
@@ -463,7 +452,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         c.text = hosp
         break
 
-    # Fila 1: Contacto y Teléfono (contacto en celda 1, teléfono en celda final derecha)
+    # Fila 1: Contacto y Teléfono
     r1 = t.rows[1].cells
     r1[1].text = contacto
     r1[-1].text = telefono
@@ -475,7 +464,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         c.text = direccion
         break
 
-    # Fila 3: Modelo y Versión de Software (modelo en celda 1, versión en celda final derecha)
+    # Fila 3: Modelo y Versión de Software
     r3 = t.rows[3].cells
     r3[1].text = modelo
     r3[-1].text = version_sw
@@ -486,50 +475,41 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Fila 5: Horómetro
     t.rows[5].cells[1].text = horometro
 
-    # Fila 6: Tipo de Servicio (Alinear columnas y marcar con ☒ dentro/al lado del cuadro)
+    # Fila 6: Tipo de Servicio (Preservar la estructura original y solo marcar el recuadro con ☒)
     c_serv = t.rows[6].cells[-1] if len(t.rows[6].cells) > 1 else t.rows[6].cells[0]
     palabra_ts = tipo_serv.split()[0]
-    
-    # Formato vertical ordenado con tabulación exacta
-    c_serv.text = (
-        "Mantenimiento Correctivo (Repair)\t\t□\t\tMantenimiento Preventivo (PM)\t\t□\n"
-        "Diagnostico (Diagnostic / Inspection)\t□\t\tEntrenamiento (Operation training)\t□\n"
-        "Instalación (Installation)\t\t\t□\t\tSeguimiento Tratamiento\t\t\t□\n"
-        "Desinstalación (Uninstallation)\t\t□\t\tOtro (Other)\t\t\t\t\t□"
-    )
-    # Marcar la opción seleccionada
-    marcar_en_celda(c_serv, palabra_ts, "☒")
+    marcar_cuadro_exacto(c_serv, palabra_ts, "☒")
 
     # Fila 7: Detalles
     c_det = t.rows[7].cells[-1] if len(t.rows[7].cells) > 1 else t.rows[7].cells[0]
     c_det.text = detalles
 
-    # Fila 8: Clasificación de Fallas (Marcar ☒ en la celda correspondiente sin tocar las demás)
+    # Fila 8: Clasificación de Fallas (Marcar ☒ en el recuadro de la opción elegida)
     if falla_tipo and falla_tipo != "Ninguno / Normal":
         for c in t.rows[8].cells:
-            marcar_en_celda(c, falla_tipo, "☒")
+            marcar_cuadro_exacto(c, falla_tipo, "☒")
 
-    # Fila 9: Motivo del Fallo y Solución (celda grande designada para solución)
+    # Fila 9: Motivo del Fallo y Solución (Escribir en el cuadro blanco grande de solución)
     c_sol = t.rows[9].cells[-1] if len(t.rows[9].cells) > 1 else t.rows[9].cells[0]
     c_sol.text = solucion
 
-    # Fila 10: Lista de verificación (Checklist con ✔ en las casillas seleccionadas)
+    # Fila 10: Lista de verificación (Marcar con ☑ check en los ítems seleccionados)
     for c in t.rows[10].cells:
         for chk in checklist_sel:
-            marcar_en_celda(c, chk, "☑")
+            marcar_cuadro_exacto(c, chk, "☑")
 
     # Fila 12: Encuesta de satisfacción (Marcar ☒ en la opción elegida)
     if satisfaccion:
         c_sat = t.rows[12].cells[-1] if len(t.rows[12].cells) > 1 else t.rows[12].cells[0]
         palabra_sat = satisfaccion.split()[0]
-        marcar_en_celda(c_sat, palabra_sat, "☒")
+        marcar_cuadro_exacto(c_sat, palabra_sat, "☒")
 
     # Tabla 1: Firmas y Nombres
     t2 = doc.tables[1]
     t2.rows[0].cells[1].text = contacto
     t2.rows[0].cells[3].text = ingeniero
     
-    # Fechas centradas horizontal y verticalmente
+    # Fechas centradas simétricamente
     cell_fec_cli = t2.rows[2].cells[1]
     cell_fec_cli.text = fecha_reporte
     cell_fec_cli.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -540,7 +520,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cell_fec_ing.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
     cell_fec_ing.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
-    # Firma: automática o subida por foto
+    # Firma: automática o imagen subida
     archivo_firma = context.user_data.get("firma_custom")
     if not archivo_firma:
         for f_nom in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
@@ -563,7 +543,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ Reporte generado: casillas alineadas con ☒, check ✔ en verificación, solución en su celda y fechas centradas."
+            caption="✅ Reporte generado: formato original intacto, solución en su celda, marcas ☒ y ☑ exactas y fechas centradas."
         )
 
     return ConversationHandler.END
