@@ -16,9 +16,7 @@ from telegram.ext import (
     filters,
 )
 import docx
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.shared import Inches
+from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
 import gspread
@@ -47,7 +45,7 @@ def iniciar_servidor_web():
     servidor = HTTPServer(("0.0.0.0", puerto), HealthHandler)
     servidor.serve_forever()
 
-# Google Sheets Autocompletado
+# Búsqueda en Google Sheets
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 def buscar_historial(busqueda):
@@ -77,22 +75,22 @@ def buscar_historial(busqueda):
     return None
 
 ITEMS_CHECKLIST = [
-    "Apariencia",
-    "Bateria de respaldo",
-    "Placa Hall",
-    "Señal de sensor",
-    "Pantalla táctil",
-    "Pieza hidráulica",
+    "Apariencia (Appearance check)",
+    "Bateria de respaldo (Backup battery)",
+    "Placa Hall o Tarjeta electronica",
+    "Señal de sensor (Sensor signal)",
+    "Pantalla táctil (Touch screen)",
+    "Pieza hidráulica (Hydraulic parts)",
     "Parametros de Tratamiento",
-    "Sim. de Tratamiento",
-    "Opciones",
-    "Sensor de Cond",
-    "Bomba Ceramica",
-    "Bomba de Heparina",
+    "Sim. de Tratamiento (Simulation treatme)",
+    "Opciones (Options)",
+    "Sensor de Cond (Conductivity sensor)",
+    "Bomba Ceramica (Ceramic pump)",
+    "Bomba de Heparina (Syringe pump)",
     "Calibración de Conductividad",
     "Calibración de Temperatura",
     "Calibración de Presión",
-    "Otros"
+    "Otros (Other)"
 ]
 
 (
@@ -256,8 +254,9 @@ def armar_teclado_checklist(seleccionados):
     botones = []
     fila = []
     for item in ITEMS_CHECKLIST:
+        nombre_corto = item.split("(")[0].strip()
         marca = "✔ " if item in seleccionados else "⬜ "
-        fila.append(InlineKeyboardButton(f"{marca}{item}", callback_data=f"chk_{item}"))
+        fila.append(InlineKeyboardButton(f"{marca}{nombre_corto}", callback_data=f"chk_{item}"))
         if len(fila) == 2:
             botones.append(fila)
             fila = []
@@ -273,7 +272,7 @@ async def get_solucion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     markup = armar_teclado_checklist(context.user_data["checklist_seleccionados"])
     await update.message.reply_text(
-        "📋 Lista de verificación de pruebas:\nToque los ítems que desea marcar con ✔ y presione 'LISTO / CONTINUAR':",
+        "📋 Lista de verificación de pruebas:\nSeleccione los ítems que desea marcar con ✔ y presione 'LISTO / CONTINUAR':",
         reply_markup=markup
     )
     return CHECKLIST_MENU
@@ -285,7 +284,7 @@ async def checklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     sel = context.user_data.get("checklist_seleccionados", [])
     
     if data == "chk_DONE":
-        await query.message.reply_text(f"✅ Se seleccionaron {len(sel)} comprobaciones.")
+        await query.message.reply_text(f"✅ Se seleccionaron {len(sel)} ítems.")
         teclado = [
             ["Satisfecho (Satisfied)"],
             ["Relativamente satisfecho"],
@@ -332,7 +331,7 @@ async def get_ingeniero(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_opcion_firma(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     if "Subir Foto" in txt:
-        await update.message.reply_text("📸 Envíe la FOTO de la firma:", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text("📸 Envíe la FOTO de la firma como imagen:", reply_markup=ReplyKeyboardRemove())
         return SUBIR_FIRMA
     
     context.user_data["firma_custom"] = None
@@ -366,56 +365,17 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💵 Moneda y cobro:", reply_markup=reply_markup)
     return MONEDA
 
-def marcar_cuadro_exacto(celda, palabra_clave, simbolo="☒"):
-    """
-    Busca la palabra clave en la celda y transforma el cuadrito asociado
-    en el símbolo deseado (☒ para X, ☑ para check) sin reescribir ni mover la celda.
-    """
-    clave = palabra_clave.lower().strip()
-    cajas = ["□", "☐", "⬜", "[ ]", "[]", "\u25a1", "\u25fb", "\u2610", "\uf06f", "o"]
-    
-    for p in celda.paragraphs:
-        if clave in p.text.lower():
-            # 1. Controles w:checkBox / w14:checkbox XML
-            for cb in p._element.xpath('.//w:checkBox | .//w14:checkbox'):
-                chk = cb.find(qn('w:checked')) or cb.find(qn('w14:checked'))
-                if chk is None:
-                    chk = OxmlElement('w:checked')
-                    cb.append(chk)
-                chk.set(qn('w:val'), "1")
-                return True
-                
-            # 2. Reemplazo en los runs del párrafo para preservar fuente y espaciado
-            for r in p.runs:
-                for cj in cajas:
-                    if cj in r.text:
-                        r.text = r.text.replace(cj, simbolo, 1)
-                        return True
-                        
-            # 3. Si el carácter de caja estaba en el párrafo general
-            for cj in cajas:
-                if cj in p.text:
-                    p.text = p.text.replace(cj, simbolo, 1)
-                    return True
-                    
-            # 4. Respaldo: agregar el símbolo al inicio de la línea sin descuadrar
-            p.text = f"{simbolo} {p.text.strip()}"
-            return True
-            
-    return False
-
 async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["moneda"] = "" if txt == "Dejar vacío" else txt
     
-    await update.message.reply_text("⏳ Procesando reporte...")
+    await update.message.reply_text("⏳ Procesando reporte Word con nuevo formato...")
     
     plantilla = "1-TECHNICAL SERVICE REPORT.docx"
     if not os.path.exists(plantilla):
         await update.message.reply_text("⚠️ No se encontró la plantilla .docx.")
         return ConversationHandler.END
 
-    # Cargar plantilla limpia para preservar diseño original intacto
     doc = docx.Document(plantilla)
     
     consecutivo = context.user_data.get("consecutivo", "")
@@ -446,28 +406,18 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     t = doc.tables[0]
 
     # Fila 0: Hospital
-    for c in t.rows[0].cells:
-        if "hospital name" in c.text.lower():
-            continue
-        c.text = hosp
-        break
+    t.rows[0].cells[1].text = hosp
 
     # Fila 1: Contacto y Teléfono
-    r1 = t.rows[1].cells
-    r1[1].text = contacto
-    r1[-1].text = telefono
+    t.rows[1].cells[1].text = contacto
+    t.rows[1].cells[-1].text = telefono
 
     # Fila 2: Dirección
-    for c in t.rows[2].cells:
-        if "dirección" in c.text.lower() or "adress" in c.text.lower():
-            continue
-        c.text = direccion
-        break
+    t.rows[2].cells[1].text = direccion
 
     # Fila 3: Modelo y Versión de Software
-    r3 = t.rows[3].cells
-    r3[1].text = modelo
-    r3[-1].text = version_sw
+    t.rows[3].cells[1].text = modelo
+    t.rows[3].cells[-1].text = version_sw
 
     # Fila 4: Serie
     t.rows[4].cells[1].text = serie
@@ -475,52 +425,109 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Fila 5: Horómetro
     t.rows[5].cells[1].text = horometro
 
-    # Fila 6: Tipo de Servicio (Preservar la estructura original y solo marcar el recuadro con ☒)
-    c_serv = t.rows[6].cells[-1] if len(t.rows[6].cells) > 1 else t.rows[6].cells[0]
-    palabra_ts = tipo_serv.split()[0]
-    marcar_cuadro_exacto(c_serv, palabra_ts, "☒")
+    # Fila 6: Tipo de Servicio (Reemplazo con casillas legibles de texto)
+    opciones_servicio = [
+        "Mantenimiento Correctivo (Repair)",
+        "Mantenimiento Preventivo (PM)",
+        "Diagnostico (Diagnostic / Inspection)",
+        "Instalación (Installation)",
+        "Entrenamiento (Operation training)",
+        "Seguimiento Tratamiento",
+        "Otro (Other)"
+    ]
+    celda_serv = t.rows[6].cells[-1]
+    celda_serv.text = ""
+    p_serv = celda_serv.paragraphs[0]
+    p_serv.paragraph_format.line_spacing = 1.15
+    for idx, op in enumerate(opciones_servicio):
+        marca = "[ ☒ ]" if op.split()[0].lower() in tipo_serv.lower() else "[    ]"
+        run = p_serv.add_run(f"{op} {marca}    ")
+        if marca == "[ ☒ ]":
+            run.bold = True
+            run.font.color.rgb = RGBColor(0, 51, 153)
+        if (idx + 1) % 2 == 0:
+            p_serv.add_run("\n")
 
     # Fila 7: Detalles
-    c_det = t.rows[7].cells[-1] if len(t.rows[7].cells) > 1 else t.rows[7].cells[0]
-    c_det.text = detalles
+    t.rows[7].cells[-1].text = detalles
 
-    # Fila 8: Clasificación de Fallas (Marcar ☒ en el recuadro de la opción elegida)
-    if falla_tipo and falla_tipo != "Ninguno / Normal":
-        for c in t.rows[8].cells:
-            marcar_cuadro_exacto(c, falla_tipo, "☒")
+    # Fila 8: Clasificación de Fallas
+    opciones_fallas = [
+        ["Fallo Hidráulico (Hydraulic fault)", "Fallo en el Circuito (Circuit fault)", "Fallo en parte de sangre (Bloodparts fault)", "Fallo en Software (Software fault)"],
+        ["Fallo Mecánico (Mechanical fault)", "Fallo de montaje de pieza (Assemble fault)", "Fallo de desgaste rápido de pieza", "Otros Fallos (Others fault)"]
+    ]
+    # Si la tabla tiene 4 columnas en la fila de fallas
+    for fila_fallas in opciones_fallas:
+        for nombre_falla in fila_fallas:
+            falla_clave = nombre_falla.split("(")[0].strip().lower()
+            for c in t.rows[8].cells:
+                if falla_clave in c.text.lower():
+                    es_seleccionada = (falla_tipo and falla_clave in falla_tipo.lower())
+                    marca = "[ ☒ ]" if es_seleccionada else "[    ]"
+                    c.text = ""
+                    p = c.paragraphs[0]
+                    p.paragraph_format.line_spacing = 1.0
+                    r_txt = p.add_run(f"{nombre_falla}  {marca}")
+                    if es_seleccionada:
+                        r_txt.bold = True
+                        r_txt.font.color.rgb = RGBColor(0, 51, 153)
 
-    # Fila 9: Motivo del Fallo y Solución (Escribir en el cuadro blanco grande de solución)
-    c_sol = t.rows[9].cells[-1] if len(t.rows[9].cells) > 1 else t.rows[9].cells[0]
-    c_sol.text = solucion
+    # Fila 9: Motivo del Fallo y Solución (celda al costado)
+    # Se busca la fila que contenga 'Motivo' y se escribe estrictamente en la celda derecha
+    for r_idx in range(len(t.rows)):
+        c_primera = t.rows[r_idx].cells[0].text.lower()
+        if "motivo del fallo" in c_primera or "fault reason" in c_primera:
+            t.rows[r_idx].cells[-1].text = solucion
+            break
 
-    # Fila 10: Lista de verificación (Marcar con ☑ check en los ítems seleccionados)
-    for c in t.rows[10].cells:
-        for chk in checklist_sel:
-            marcar_cuadro_exacto(c, chk, "☑")
+    # Fila 10: Lista de verificación (Checklist con marca al final)
+    for r_idx in range(len(t.rows)):
+        fila_txt = " ".join([c.text.lower() for c in t.rows[r_idx].cells])
+        if "apariencia" in fila_txt or "lista de verificación" in fila_txt:
+            for c in t.rows[r_idx].cells:
+                for item_full in ITEMS_CHECKLIST:
+                    item_clave = item_full.split("(")[0].strip().lower()
+                    if item_clave in c.text.lower():
+                        es_chequeado = item_full in checklist_sel
+                        marca = "[ ✔ ]" if es_chequeado else "[    ]"
+                        c.text = ""
+                        p = c.paragraphs[0]
+                        p.paragraph_format.line_spacing = 1.0
+                        r_item = p.add_run(f"{item_full}  {marca}")
+                        if es_chequeado:
+                            r_item.bold = True
+                            r_item.font.color.rgb = RGBColor(0, 128, 0)
 
-    # Fila 12: Encuesta de satisfacción (Marcar ☒ en la opción elegida)
-    if satisfaccion:
-        c_sat = t.rows[12].cells[-1] if len(t.rows[12].cells) > 1 else t.rows[12].cells[0]
-        palabra_sat = satisfaccion.split()[0]
-        marcar_cuadro_exacto(c_sat, palabra_sat, "☒")
+    # Fila 12: Encuesta de satisfacción
+    opciones_sat = [
+        "Satisfecho (Satisfied)",
+        "Relativamente satisfecho",
+        "Normal (Normal)",
+        "Insatisfecho (Dissatisfied)",
+        "Muy Insatisfecho (Very Dissatisfied)"
+    ]
+    for r in t.rows:
+        if any("encuesta de satisfacción" in c.text.lower() or "satisfaction" in c.text.lower() for c in r.cells):
+            c_sat = r.cells[-1]
+            c_sat.text = ""
+            p_sat = c_sat.paragraphs[0]
+            p_sat.paragraph_format.line_spacing = 1.15
+            for sat_op in opciones_sat:
+                marca = "[ ☒ ]" if (satisfaccion and sat_op.split()[0].lower() in satisfaccion.lower()) else "[    ]"
+                r_sat = p_sat.add_run(f"{sat_op} {marca}   ")
+                if marca == "[ ☒ ]":
+                    r_sat.bold = True
+                    r_sat.font.color.rgb = RGBColor(0, 51, 153)
+            break
 
     # Tabla 1: Firmas y Nombres
     t2 = doc.tables[1]
     t2.rows[0].cells[1].text = contacto
     t2.rows[0].cells[3].text = ingeniero
-    
-    # Fechas centradas simétricamente
-    cell_fec_cli = t2.rows[2].cells[1]
-    cell_fec_cli.text = fecha_reporte
-    cell_fec_cli.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-    cell_fec_cli.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    t2.rows[2].cells[1].text = fecha_reporte
+    t2.rows[2].cells[3].text = fecha_reporte
 
-    cell_fec_ing = t2.rows[2].cells[3]
-    cell_fec_ing.text = fecha_reporte
-    cell_fec_ing.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-    cell_fec_ing.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-
-    # Firma: automática o imagen subida
+    # Determinar qué firma usar
     archivo_firma = context.user_data.get("firma_custom")
     if not archivo_firma:
         for f_nom in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
@@ -543,7 +550,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ Reporte generado: formato original intacto, solución en su celda, marcas ☒ y ☑ exactas y fechas centradas."
+            caption="✅ Reporte generado: Casillas estándar [ ☒ ], checklist con [ ✔ ] al final, motivo ubicado al costado y firma centrada."
         )
 
     return ConversationHandler.END
