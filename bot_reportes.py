@@ -18,6 +18,8 @@ import docx
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -55,9 +57,9 @@ ITEMS_CHECKLIST = [
     "Sensor de Cond. (Conductivity sensor)",
     "Bomba Ceramica (Ceramic pump)",
     "Bomba de Heparina (Syringe pump)",
-    "Calibración de Conductividad",
-    "Calibración de Temperatura",
-    "Calibración de Presión",
+    "Calibración de Conductividad (Cond. Calibration)",
+    "Calibración de Temperatura (Temp. calibration)",
+    "Calibración de Presión (Pressure calibration)",
     "Otros (Other)"
 ]
 
@@ -225,7 +227,7 @@ async def checklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.message.reply_text(f"✅ Se seleccionaron {len(sel)} ítems.")
         teclado = [["Omitir / Todo Vacío"], ["Dejar vacío"]]
         reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-        await query.message.reply_text("⚙️ Registro de componentes:\nIngrese Nombre de la parte (Component name):", reply_markup=reply_markup)
+        await query.message.reply_text("⚙️ Registro de reemplazo de componentes:\nIngrese Nombre de la parte (o pulse Omitir):", reply_markup=reply_markup)
         return REP_PARTE
         
     elif data == "chk_ALL":
@@ -343,7 +345,6 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MONEDA
 
 def escribir_con_espacio(celda, texto, negrita=False):
-    """Escribe el texto con un espacio de separación del borde de la celda"""
     celda.text = ""
     p = celda.paragraphs[0]
     p.paragraph_format.space_before = Pt(1)
@@ -352,6 +353,16 @@ def escribir_con_espacio(celda, texto, negrita=False):
     run.font.size = Pt(8)
     if negrita:
         run.bold = True
+
+def quitar_borde_derecho(celda):
+    tcPr = celda._tc.get_or_add_tcPr()
+    tcBorders = parse_xml(f'<w:tcBorders {nsdecls("w")}><w:right w:val="none"/></w:tcBorders>')
+    tcPr.append(tcBorders)
+
+def quitar_borde_izquierdo(celda):
+    tcPr = celda._tc.get_or_add_tcPr()
+    tcBorders = parse_xml(f'<w:tcBorders {nsdecls("w")}><w:left w:val="none"/></w:tcBorders>')
+    tcPr.append(tcBorders)
 
 async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
@@ -400,7 +411,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     c.text = f"  Consecutivo (Consecutive)\n  {consecutivo}"
                     break
 
-    # 1. Datos del cliente y equipo (con espacio separador del borde)
+    # 1. Datos del cliente y equipo
     for r in t.rows:
         txt_fila = [c.text.strip().lower() for c in r.cells]
         if any("hospital name" in x for x in txt_fila):
@@ -417,14 +428,22 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             escribir_con_espacio(r.cells[1], serie)
         if any("running" in x or "horometro" in x for x in txt_fila):
             escribir_con_espacio(r.cells[1], horometro)
+            
+        # Detalles: Título centrado vertical y horizontalmente
         if any("feedback details" in x or "detalles" in x for x in txt_fila):
-            # Formato exacto solicitado para el título
-            r.cells[0].text = "Detalles\n(Feedback Details)"
+            r.cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            r.cells[0].text = ""
+            p_det_tit = r.cells[0].paragraphs[0]
+            p_det_tit.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p_det_tit.paragraph_format.space_before = Pt(0)
+            p_det_tit.paragraph_format.space_after = Pt(0)
+            p_det_tit.add_run("Detalles\n(Feedback Details)").font.size = Pt(8.5)
             escribir_con_espacio(r.cells[-1], detalles)
+            
         if any("motivo del fallo" in x or "fault reason" in x for x in txt_fila):
             escribir_con_espacio(r.cells[-1], solucion)
 
-    # 2. Tipo de Servicio: Conservar título exacto a la izquierda y columnas a la derecha
+    # 2. Tipo de Servicio: Ocultar línea divisoria central
     col1 = [
         ("Mantenimiento Correctivo (Repair)", "correctivo"),
         ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
@@ -440,11 +459,17 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for r in t.rows:
         if any("service type" in c.text.lower() or "tipo de servicio" in c.text.lower() for c in r.cells):
-            # Título celda izquierda
             r.cells[0].text = "Tipo de Servicio\n(Service Type)"
-            r.cells[0].paragraphs[0].paragraph_format.space_before = Pt(2)
+            r.cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            r.cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             
             c_izq = r.cells[1]
+            c_der = r.cells[-1]
+            
+            # Ocultar la línea vertical entre ambas celdas
+            quitar_borde_derecho(c_izq)
+            quitar_borde_izquierdo(c_der)
+            
             c_izq.text = ""
             for idx, (op, clave) in enumerate(col1):
                 p = c_izq.add_paragraph() if idx > 0 else c_izq.paragraphs[0]
@@ -458,7 +483,6 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if sel:
                     run.bold = True
 
-            c_der = r.cells[-1]
             c_der.text = ""
             for idx, (op, clave) in enumerate(col2):
                 p = c_der.add_paragraph() if idx > 0 else c_der.paragraphs[0]
@@ -507,12 +531,12 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             run.bold = True
                         break
 
-    # 4. Lista de Verificación (Corrigiendo Conductividad y Temperatura)
+    # 4. Lista de Verificación (Bilingüe completo para calibraciones)
     for r in t.rows:
         txt_r = " ".join([c.text.lower() for c in r.cells])
         if "apariencia" in txt_r or "pantalla táctil" in txt_r or "calibración" in txt_r or "conductividad" in txt_r:
             for c in r.cells:
-                txt_c = " ".join(c.text.lower().split())  # Normaliza espacios
+                txt_c = " ".join(c.text.lower().split())
                 for item_full in ITEMS_CHECKLIST:
                     item_clave = item_full.split("(")[0].strip().lower()
                     if item_clave in txt_c or (item_clave == "calibración de conductividad" and "conductiv" in txt_c) or (item_clave == "calibración de temperatura" and "temperat" in txt_c):
@@ -529,20 +553,29 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             run.bold = True
                         break
 
-    # 5. Registro de Reemplazo de Componentes (llenar fila si se ingresaron datos)
+    # 5. Registro de Reemplazo de Componentes (Llenado en cuadrícula de repuestos)
     if rep_p or rep_c or rep_o:
-        for r_idx, r in enumerate(t.rows):
-            txt_r = " ".join([c.text.lower() for c in r.cells])
-            if "nombre de la parte" in txt_r or "component name" in txt_r:
-                if r_idx + 1 < len(t.rows):
-                    fila_target = t.rows[r_idx + 1]
-                    if len(fila_target.cells) >= 3:
-                        escribir_con_espacio(fila_target.cells[0], rep_p)
-                        escribir_con_espacio(fila_target.cells[1], rep_c)
-                        escribir_con_espacio(fila_target.cells[2], rep_o)
+        idx_rep = None
+        for i_r, r_obj in enumerate(t.rows):
+            txt_row = " ".join([c.text.lower() for c in r_obj.cells])
+            if "nombre de la parte" in txt_row or "component name" in txt_row:
+                idx_rep = i_r + 1
                 break
+                
+        if idx_rep and idx_rep < len(t.rows):
+            fila_rep = t.rows[idx_rep]
+            # Mapeo por celdas reales de la tabla
+            celdas_datos = [c for c in fila_rep.cells if "registro de reemplazo" not in c.text.lower()]
+            if len(celdas_datos) >= 3:
+                escribir_con_espacio(celdas_datos[0], rep_p)
+                escribir_con_espacio(celdas_datos[1], rep_c)
+                escribir_con_espacio(celdas_datos[2], rep_o)
+            elif len(fila_rep.cells) >= 4:
+                escribir_con_espacio(fila_rep.cells[1], rep_p)
+                escribir_con_espacio(fila_rep.cells[2], rep_c)
+                escribir_con_espacio(fila_rep.cells[3], rep_o)
 
-    # 6. Encuesta de Satisfacción (Centrada y limpia)
+    # 6. Encuesta de Satisfacción
     opciones_sat = [
         "Satisfecho (Satisfield)",
         "Relativamente satisfecho",
