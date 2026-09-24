@@ -3,7 +3,6 @@ import sys
 import json
 import logging
 import threading
-import subprocess
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
@@ -17,7 +16,7 @@ from telegram.ext import (
     filters,
 )
 import docx
-from docx.shared import Inches, Pt
+from docx.shared import Inches
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -28,7 +27,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Servidor HTTP para Render
+# Servidor web Render
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -44,7 +43,7 @@ def iniciar_servidor_web():
     servidor = HTTPServer(("0.0.0.0", puerto), HealthHandler)
     servidor.serve_forever()
 
-# Búsqueda en Google Sheets
+# Google Sheets Autocompletado
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 def buscar_historial(busqueda):
@@ -73,17 +72,25 @@ def buscar_historial(busqueda):
         logger.error(f"Error Sheets: {e}")
     return None
 
-def convertir_a_pdf(ruta_docx):
-    """Convierte Word a PDF usando LibreOffice o soffice en Linux"""
-    try:
-        cmd = f"libreoffice --headless --convert-to pdf '{ruta_docx}'"
-        res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=40)
-        ruta_pdf = ruta_docx.replace(".docx", ".pdf")
-        if os.path.exists(ruta_pdf):
-            return ruta_pdf
-    except Exception as e:
-        logger.error(f"Fallo conversion LibreOffice: {e}")
-    return None
+# Lista fija de verificación
+ITEMS_CHECKLIST = [
+    "Apariencia (Appearance check)",
+    "Bateria de respaldo (Backup battery)",
+    "Placa Hall o Tarjeta electronica",
+    "Señal de sensor (Sensor signal)",
+    "Pantalla táctil (Touch screen)",
+    "Pieza hidráulica (Hydraulic parts)",
+    "Parametros de Tratamiento",
+    "Sim. de Tratamiento (Simulation treatment)",
+    "Opciones (Options)",
+    "Sensor de Cond (Conductivity sensor)",
+    "Bomba Ceramica (Ceramic pump)",
+    "Bomba de Heparina (Syringe pump)",
+    "Calibración de Conductividad",
+    "Calibración de Temperatura",
+    "Calibración de Presión",
+    "Otros (Other)"
+]
 
 # Estados
 (
@@ -101,19 +108,21 @@ def convertir_a_pdf(ruta_docx):
     DETALLES,
     FALLA_TIPO,
     SOLUCION,
-    CHECKLIST,
-    REPUESTOS,
+    CHECKLIST_MENU,
+    REPUESTOS_OPCION,
+    REPUESTOS_TEXTO,
     SATISFACCION,
     INGENIERO,
     FECHA,
     MONEDA,
-) = range(20)
+) = range(21)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Usa /reporte para iniciar el formulario de servicio técnico.")
+    await update.message.reply_text("👋 Usa /reporte para iniciar el formulario técnico.")
 
 async def iniciar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
+    context.user_data["checklist_seleccionados"] = []
     teclado = [["Dejar vacío"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text("📄 Ingrese Consecutivo (ej: 0000008) o pulse Dejar vacío:", reply_markup=reply_markup)
@@ -122,7 +131,7 @@ async def iniciar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_consecutivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["consecutivo"] = "" if txt == "Dejar vacío" else txt
-    await update.message.reply_text("🏥 Ingrese Nombre de la Clínica/Hospital o Contacto para buscar historial:", reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text("🏥 Ingrese Nombre de la Clínica o Contacto para autocompletar:", reply_markup=ReplyKeyboardRemove())
     return BUSCAR_CLIENTE
 
 async def get_buscar_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -135,12 +144,12 @@ async def get_buscar_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE)
         teclado = [["✅ Sí, autocompletar"], ["✏️ No, ingresar manual"]]
         reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
         await update.message.reply_text(
-            f"💡 Datos encontrados en historial:\n"
+            f"💡 Historial encontrado:\n"
             f"🏥 Clínica: {previo['hospital']}\n"
             f"👤 Contacto: {previo['contacto']}\n"
             f"📞 Teléfono: {previo['telefono']}\n"
             f"📍 Dirección: {previo['direccion']}\n\n"
-            f"¿Deseas autocompletar?",
+            f"¿Deseas autocompletar estos datos?",
             reply_markup=reply_markup
         )
         return CONFIRMAR_AUTO
@@ -204,9 +213,10 @@ async def get_version_sw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["version_sw"] = "" if txt == "Dejar vacío" else txt
     teclado = [
-        ["Instalación (Installation)"],
-        ["Mantenimiento Preventivo (PM)"],
         ["Mantenimiento Correctivo (Repair)"],
+        ["Mantenimiento Preventivo (PM)"],
+        ["Instalación (Installation)"],
+        ["Diagnostico (Diagnostic / Inspection)"],
         ["Entrenamiento (Operation training)"],
         ["Seguimiento Tratamiento"],
         ["Otro (Other)"]
@@ -223,18 +233,14 @@ async def get_tipo_servicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_detalles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["detalles"] = update.message.text
     teclado = [
-        ["Fallo Mecánico"],
-        ["Fallo Hidráulico"],
-        ["Fallo en el Circuito"],
-        ["Fallo en Software"],
-        ["Fallo en parte de sangre"],
-        ["Fallo de montaje de pieza"],
-        ["Fallo de desgaste rápido de pieza"],
-        ["Otros Fallos"],
+        ["Fallo Mecánico", "Fallo Hidráulico"],
+        ["Fallo en el Circuito", "Fallo en Software"],
+        ["Fallo en parte de sangre", "Fallo de montaje de pieza"],
+        ["Fallo de desgaste rápido de pieza", "Otros Fallos"],
         ["Ninguno / Normal"]
     ]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("⚠️ Seleccione Clasificación de Fallas:", reply_markup=reply_markup)
+    await update.message.reply_text("⚠️ Clasificación de Fallas:", reply_markup=reply_markup)
     return FALLA_TIPO
 
 async def get_falla_tipo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -244,40 +250,83 @@ async def get_falla_tipo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💡 Ingrese Motivo del Fallo y Solución:", reply_markup=reply_markup)
     return SOLUCION
 
+def armar_teclado_checklist(seleccionados):
+    botones = []
+    for item in ITEMS_CHECKLIST:
+        marca = "✔ " if item in seleccionados else "⬜ "
+        botones.append([InlineKeyboardButton(f"{marca}{item[:30]}", callback_data=f"chk_{item}")])
+    botones.append([InlineKeyboardButton("✨ SELECCIONAR TODO", callback_data="chk_ALL")])
+    botones.append([InlineKeyboardButton("✅ LISTO / CONTINUAR", callback_data="chk_DONE")])
+    return InlineKeyboardMarkup(botones)
+
 async def get_solucion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["solucion"] = "" if txt == "Dejar vacío" else txt
     
-    teclado = [
-        ["✅ Marcar TODO Conforme (✔)"],
-        ["Apariencia, Batería, Placa, Sensores"],
-        ["Pantalla táctil, Hidráulica, Parámetros"],
-        ["Bombas (Cerámica/Heparina), Calibraciones"],
-        ["Dejar vacío"]
-    ]
-    reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("📋 Lista de verificación de servicio técnico:", reply_markup=reply_markup)
-    return CHECKLIST
+    markup = armar_teclado_checklist(context.user_data["checklist_seleccionados"])
+    await update.message.reply_text(
+        "📋 Lista de verificación:\nToca los ítems que deseas marcar con ✔ y al terminar pulsa 'LISTO / CONTINUAR':",
+        reply_markup=markup
+    )
+    return CHECKLIST_MENU
 
-async def get_checklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["checklist"] = update.message.text
-    teclado = [["Dejar vacío"]]
-    reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("⚙️ Registro de reemplazo de componentes (Nombre, Cantidad, Obs) o pulse Dejar vacío:", reply_markup=reply_markup)
-    return REPUESTOS
+async def checklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    sel = context.user_data.get("checklist_seleccionados", [])
+    
+    if data == "chk_DONE":
+        await query.message.reply_text(f"✅ Se seleccionaron {len(sel)} ítems de la lista de verificación.")
+        teclado = [["Dejar vacío"], ["Ingresar componentes reemplazados"]]
+        reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
+        await query.message.reply_text("⚙️ Registro de reemplazo de componentes:", reply_markup=reply_markup)
+        return REPUESTOS_OPCION
+        
+    elif data == "chk_ALL":
+        context.user_data["checklist_seleccionados"] = list(ITEMS_CHECKLIST)
+    else:
+        item = data.replace("chk_", "")
+        if item in sel:
+            sel.remove(item)
+        else:
+            sel.append(item)
+        context.user_data["checklist_seleccionados"] = sel
 
-async def get_repuestos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text
-    context.user_data["repuestos"] = "" if txt == "Dejar vacío" else txt
+    await query.edit_message_reply_markup(reply_markup=armar_teclado_checklist(context.user_data["checklist_seleccionados"]))
+    return CHECKLIST_MENU
+
+async def get_repuestos_opcion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text == "Dejar vacío":
+        context.user_data["repuestos"] = []
+        teclado = [
+            ["Satisfecho (Satisfied)"],
+            ["Relativamente satisfecho"],
+            ["Normal (Normal)"],
+            ["Insatisfecho (Dissatisfied)"],
+            ["Muy Insatisfecho (Very Dissatisfied)"]
+        ]
+        reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
+        await update.message.reply_text("⭐ Encuesta de satisfacción / Opinión de usuario:", reply_markup=reply_markup)
+        return SATISFACCION
+    else:
+        await update.message.reply_text(
+            "Escriba los componentes en este formato:\nNombre de la parte | Cantidad | Observación\n(ej: Válvula solenoide | 2 | Nueva)",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return REPUESTOS_TEXTO
+
+async def get_repuestos_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["repuestos_txt"] = update.message.text
     teclado = [
         ["Satisfecho (Satisfied)"],
         ["Relativamente satisfecho"],
-        ["Normal"],
+        ["Normal (Normal)"],
         ["Insatisfecho (Dissatisfied)"],
-        ["Muy Insatisfecho"]
+        ["Muy Insatisfecho (Very Dissatisfied)"]
     ]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("⭐ Opinión de usuario / Encuesta de satisfacción:", reply_markup=reply_markup)
+    await update.message.reply_text("⭐ Encuesta de satisfacción / Opinión de usuario:", reply_markup=reply_markup)
     return SATISFACCION
 
 async def get_satisfaccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -290,20 +339,20 @@ async def get_satisfaccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_ingeniero(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     if txt == "Ingresar otro nombre":
-        await update.message.reply_text("Escriba el nombre completo del ingeniero:", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text("Escriba el nombre del ingeniero:", reply_markup=ReplyKeyboardRemove())
         return INGENIERO
     context.user_data["ingeniero"] = txt
     
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
     teclado = [[fecha_hoy], ["Ingresar otra fecha"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("📅 Fecha del reporte:", reply_markup=reply_markup)
+    await update.message.reply_text("📅 Fecha del reporte (seleccione o edite):", reply_markup=reply_markup)
     return FECHA
 
 async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     if txt == "Ingresar otra fecha":
-        await update.message.reply_text("Ingrese la fecha (ej: DD/MM/AAAA):", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text("Escriba la fecha (ej: 24/09/2026):", reply_markup=ReplyKeyboardRemove())
         return FECHA
     context.user_data["fecha"] = txt
     
@@ -312,17 +361,14 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💵 Moneda y cobro:", reply_markup=reply_markup)
     return MONEDA
 
-def marcar_en_parrafo(parrafo, texto_clave):
-    """Busca el texto y coloca la marca [X] al lado sin descuadrar la celda"""
-    if texto_clave.lower() in parrafo.text.lower():
-        parrafo.text = parrafo.text.replace("□", "[X]").replace("☐", "[X]")
-        return True
-    return False
-
-def marcar_en_celda(celda, texto_clave):
-    for p in celda.paragraphs:
-        if texto_clave.lower() in p.text.lower():
-            p.text = p.text.replace("□", "[X]").replace("☐", "[X]")
+def reemplazar_en_parrafos(contenedor, texto_buscar, texto_reemplazo):
+    for p in contenedor.paragraphs:
+        if texto_buscar.lower() in p.text.lower():
+            for run in p.runs:
+                if texto_buscar.lower() in run.text.lower():
+                    run.text = run.text.replace(texto_buscar, texto_reemplazo)
+                    return True
+            p.text = p.text.replace(texto_buscar, texto_reemplazo)
             return True
     return False
 
@@ -330,7 +376,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["moneda"] = "" if txt == "Dejar vacío" else txt
     
-    await update.message.reply_text("⏳ Procesando reporte y compilando PDF...")
+    await update.message.reply_text("⏳ Procesando reporte en Word y manteniendo diseño intacto...")
     
     plantilla = "1-TECHNICAL SERVICE REPORT.docx"
     if not os.path.exists(plantilla):
@@ -339,168 +385,163 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     doc = docx.Document(plantilla)
     
-    # 1. Llenar Consecutivo
     consecutivo = context.user_data.get("consecutivo", "")
+    hosp = context.user_data.get("hospital", "")
+    contacto = context.user_data.get("contacto", "")
+    telefono = context.user_data.get("telefono", "")
+    direccion = context.user_data.get("direccion", "")
+    modelo = context.user_data.get("modelo", "")
+    serie = context.user_data.get("serie", "")
+    horometro = context.user_data.get("horometro", "")
+    version_sw = context.user_data.get("version_sw", "")
+    detalles = context.user_data.get("detalles", "")
+    solucion = context.user_data.get("solucion", "")
+    tipo_serv = context.user_data.get("tipo_servicio", "")
+    falla_tipo = context.user_data.get("falla_tipo", "")
+    satisfaccion = context.user_data.get("satisfaccion", "")
+    checklist_sel = context.user_data.get("checklist_seleccionados", [])
+    repuestos_txt = context.user_data.get("repuestos_txt", "")
+    ingeniero = context.user_data.get("ingeniero", "Jesus Guillermo Pascual chalan")
+    fecha_reporte = context.user_data.get("fecha", datetime.now().strftime("%d/%m/%Y"))
+
+    # 1. Consecutivo
     if consecutivo:
         for p in doc.paragraphs:
             if "consecutivo" in p.text.lower():
-                p.add_run(f" {consecutivo}")
+                p.text = f"Consecutivo: {consecutivo}"
                 break
 
-    # Recorrer las tablas del documento
+    # 2. Recorrer celdas de las tablas con mapeo inteligente
     for t in doc.tables:
         for r in t.rows:
-            # Identificar celdas por su etiqueta exacta para no errar por índices
-            textos_fila = [c.text.strip().lower() for c in r.cells]
-            
-            # Hospital Name
-            if any("hospital name" in x for x in textos_fila):
-                for idx, c in enumerate(r.cells):
-                    if "hospital name" in c.text.lower() and idx + 1 < len(r.cells):
-                        r.cells[idx + 1].text = context.user_data.get("hospital", "")
-                        break
-                        
-            # Contacto y Telefono
-            if any("contact" in x for x in textos_fila) and any("phone" in x for x in textos_fila):
-                for idx, c in enumerate(r.cells):
-                    if "contact" in c.text.lower() and "phone" not in c.text.lower():
-                        if idx + 1 < len(r.cells):
-                            r.cells[idx + 1].text = context.user_data.get("contacto", "")
-                    elif "phone" in c.text.lower():
-                        if idx + 1 < len(r.cells):
-                            r.cells[idx + 1].text = context.user_data.get("telefono", "")
-                            
-            # Dirección
-            if any("adress" in x or "dirección" in x for x in textos_fila):
-                for idx, c in enumerate(r.cells):
-                    if ("adress" in c.text.lower() or "dirección" in c.text.lower()) and idx + 1 < len(r.cells):
-                        r.cells[idx + 1].text = context.user_data.get("direccion", "")
-                        break
+            # Identificar fila de cliente
+            for i, c in enumerate(r.cells):
+                txt_c = c.text.strip().lower()
+                
+                # Nombre del cliente
+                if "nombre del cliente" in txt_c and i + 1 < len(r.cells):
+                    r.cells[i + 1].text = hosp
+                
+                # Nombre del contacto (sin borrar etiqueta de teléfono)
+                if "nombre de contacto" in txt_c and "telefono" not in txt_c:
+                    if i + 1 < len(r.cells) and "telefono" not in r.cells[i + 1].text.lower():
+                        r.cells[i + 1].text = contacto
+                
+                # Teléfono: buscar la celda específica de valor
+                if "telefono" in txt_c or "number phone" in txt_c:
+                    if i + 1 < len(r.cells):
+                        r.cells[i + 1].text = telefono
 
-            # Modelo y Software Version
-            if any("model" in x for x in textos_fila):
-                for idx, c in enumerate(r.cells):
-                    if "model" in c.text.lower() and "version" not in c.text.lower():
-                        if idx + 1 < len(r.cells):
-                            r.cells[idx + 1].text = context.user_data.get("modelo", "")
-                    elif "version" in c.text.lower() or "operating version" in c.text.lower():
-                        if idx + 1 < len(r.cells):
-                            r.cells[idx + 1].text = context.user_data.get("version_sw", "")
+                # Dirección
+                if "dirección" in txt_c or "adress" in txt_c:
+                    if i + 1 < len(r.cells):
+                        r.cells[i + 1].text = direccion
 
-            # Serial No.
-            if any("serial no" in x for x in textos_fila):
-                for idx, c in enumerate(r.cells):
-                    if "serial no" in c.text.lower() and idx + 1 < len(r.cells):
-                        r.cells[idx + 1].text = context.user_data.get("serie", "")
-                        break
+                # Modelo (sin tocar celda de versión de software)
+                if "modelo" in txt_c and "versión" not in txt_c:
+                    if i + 1 < len(r.cells) and "versión" not in r.cells[i + 1].text.lower():
+                        r.cells[i + 1].text = modelo
 
-            # Horómetro
-            if any("running hours" in x or "horometro" in x for x in textos_fila):
-                for idx, c in enumerate(r.cells):
-                    if ("running hours" in c.text.lower() or "horometro" in c.text.lower()) and idx + 1 < len(r.cells):
-                        r.cells[idx + 1].text = context.user_data.get("horometro", "")
-                        break
+                # Versión de software: escribir al lado derecho de su título
+                if "versión de software" in txt_c or "operating version" in txt_c:
+                    if i + 1 < len(r.cells):
+                        r.cells[i + 1].text = version_sw
 
-            # Detalles / Feedback Details
-            if any("feedback details" in x or "detalles" in x for x in textos_fila):
-                for idx, c in enumerate(r.cells):
-                    if ("feedback details" in c.text.lower() or "detalles" in c.text.lower()) and idx + 1 < len(r.cells):
-                        r.cells[idx + 1].text = context.user_data.get("detalles", "")
-                        break
+                # Serial No.
+                if "número de serial" in txt_c or "serial no" in txt_c:
+                    if i + 1 < len(r.cells):
+                        r.cells[i + 1].text = serie
 
-            # Motivo del fallo y solución
-            if any("fault reason and solution" in x or "motivo del fallo" in x for x in textos_fila):
-                for idx, c in enumerate(r.cells):
-                    if ("fault reason" in c.text.lower() or "motivo" in c.text.lower()) and idx + 1 < len(r.cells):
-                        r.cells[idx + 1].text = context.user_data.get("solucion", "")
-                        break
+                # Horómetro
+                if "horometro" in txt_c or "running hours" in txt_c:
+                    if i + 1 < len(r.cells):
+                        r.cells[i + 1].text = horometro
 
-            # Marcar Tipo de Servicio sin descuadrar
-            ts = context.user_data.get("tipo_servicio", "")
-            if any("installation" in x or "mantenimiento preventivo" in x for x in textos_fila):
-                for c in r.cells:
-                    if "instal" in ts.lower() and "installation" in c.text.lower():
-                        c.text = c.text.replace("□", "[X]").replace("☐", "[X]")
-                    elif "preventivo" in ts.lower() and "preventivo" in c.text.lower():
-                        c.text = c.text.replace("□", "[X]").replace("☐", "[X]")
-                    elif "correctivo" in ts.lower() and "correctivo" in c.text.lower():
-                        c.text = c.text.replace("□", "[X]").replace("☐", "[X]")
+                # Detalles / Feedback Details
+                if "detalles" in txt_c or "feedback details" in txt_c:
+                    if i + 1 < len(r.cells):
+                        r.cells[i + 1].text = detalles
 
-            # Marcar Clasificación de Fallas sin descuadrar
-            tf = context.user_data.get("falla_tipo", "")
-            if tf and tf != "Ninguno / Normal":
-                for c in r.cells:
-                    if tf.lower() in c.text.lower():
-                        c.text = c.text.replace("□", "[X]").replace("☐", "[X]")
+                # Motivo del Fallo y Solución
+                if "motivo del fallo" in txt_c or "fault reason" in txt_c:
+                    if i + 1 < len(r.cells):
+                        r.cells[i + 1].text = solucion
 
-            # Marcar Checklist
-            chk = context.user_data.get("checklist", "")
-            if "marcar todo" in chk.lower() or "todo ok" in chk.lower():
-                if any("apariencia" in x or "bateria" in x or "pantalla" in x for x in textos_fila):
-                    for c in r.cells:
-                        c.text = c.text.replace("□", "✔").replace("☐", "✔")
+                # Tipo de Servicio: insertar [X] exacto sin descuadrar
+                if "tipo de servicio" in txt_c or "service type" in txt_c or "correctivo" in txt_c:
+                    for opcion in ["Mantenimiento Correctivo (Repair)", "Mantenimiento Preventivo (PM)", "Instalación (Installation)", "Diagnostico", "Entrenamiento", "Seguimiento", "Otro (Other)"]:
+                        if opcion.split()[0].lower() in tipo_serv.lower() and opcion.split()[0].lower() in c.text.lower():
+                            c.text = c.text.replace(opcion, f"[X] {opcion}")
 
-            # Encuesta de satisfacción / Opinión de usuario
-            sat = context.user_data.get("satisfaccion", "")
-            if any("very satisfied" in x or "satisfecho" in x for x in textos_fila):
-                for c in r.cells:
-                    if "muy insatisfecho" in sat.lower() and "muy insatisfecho" in c.text.lower():
-                        c.text = c.text.replace("□", "[X]").replace("☐", "[X]")
-                    elif "insatisfecho" in sat.lower() and "insatisfecho" in c.text.lower():
-                        c.text = c.text.replace("□", "[X]").replace("☐", "[X]")
-                    elif "relativamente" in sat.lower() and "relativamente" in c.text.lower():
-                        c.text = c.text.replace("□", "[X]").replace("☐", "[X]")
-                    elif "satisfecho" in sat.lower() and "satisfecho" in c.text.lower():
-                        c.text = c.text.replace("□", "[X]").replace("☐", "[X]")
+                # Clasificación de fallas: insertar [X]
+                if falla_tipo and falla_tipo != "Ninguno / Normal":
+                    for p in c.paragraphs:
+                        if falla_tipo.lower() in p.text.lower():
+                            p.text = p.text.replace(falla_tipo, f"[X] {falla_tipo}")
 
-            # Firmas, Ingeniero y Fechas
-            if any("engineer name" in x or "customer name" in x for x in textos_fila):
-                for idx, c in enumerate(r.cells):
-                    if "customer name" in c.text.lower() and idx + 1 < len(r.cells):
-                        r.cells[idx + 1].text = context.user_data.get("contacto", "")
-                    elif "engineer name" in c.text.lower() and idx + 1 < len(r.cells):
-                        r.cells[idx + 1].text = context.user_data.get("ingeniero", "Jesus Guillermo Pascual chalan")
+                # Lista de verificación: insertar check ✔ en los elegidos
+                for item_chk in checklist_sel:
+                    nombre_corto = item_chk.split("(")[0].strip()
+                    if nombre_corto.lower() in c.text.lower():
+                        for p in c.paragraphs:
+                            if nombre_corto.lower() in p.text.lower():
+                                p.text = f"✔ {p.text}"
 
-            # Fecha de firma
-            if any("signature date" in x or "fecha de firma" in x for x in textos_fila):
-                fecha_val = context.user_data.get("fecha", datetime.now().strftime("%d/%m/%Y"))
-                for idx, c in enumerate(r.cells):
-                    if ("signature date" in c.text.lower() or "fecha de firma" in c.text.lower()) and idx + 1 < len(r.cells):
-                        r.cells[idx + 1].text = fecha_val
+                # Satisfacción del usuario: insertar [X]
+                if satisfaccion:
+                    sat_clave = satisfaccion.split("(")[0].strip()
+                    if sat_clave.lower() in c.text.lower():
+                        for p in c.paragraphs:
+                            if sat_clave.lower() in p.text.lower():
+                                p.text = p.text.replace(sat_clave, f"[X] {sat_clave}")
 
-    # Insertar la firma en la celda correspondiente
-    for t in doc.tables:
-        for r_idx, r in enumerate(t.rows):
-            for c_idx, c in enumerate(r.cells):
-                if "engineer signature" in c.text.lower() or "firma del ingeniero" in c.text.lower():
-                    # La celda de abajo o contigua
-                    target_cell = None
-                    if r_idx + 1 < len(t.rows):
-                        target_cell = t.rows[r_idx + 1].cells[c_idx]
-                    else:
-                        target_cell = c
-                    
-                    if target_cell and os.path.exists("firma_transparente.png"):
-                        target_cell.text = ""
-                        p = target_cell.paragraphs[0]
-                        p.add_run().add_picture("firma_transparente.png", width=Inches(1.4))
-                        break
+                # Reemplazo de componentes
+                if repuestos_txt and ("registro de reemplazo" in txt_c or "component replacement" in txt_c):
+                    if i + 1 < len(r.cells):
+                        r.cells[i + 1].text = repuestos_txt
 
-    base_nombre = f"Reporte_{context.user_data.get('serie', 'servicio')}_{datetime.now().strftime('%Y%m%d_%H%M')}"
-    ruta_docx = f"{base_nombre}.docx"
-    doc.save(ruta_docx)
-    
-    # Conversión a PDF
-    ruta_pdf = convertir_a_pdf(ruta_docx)
-    archivo_final = ruta_pdf if (ruta_pdf and os.path.exists(ruta_pdf)) else ruta_docx
-    
-    with open(archivo_final, "rb") as f:
+                # Clientes / Ingeniero y Fechas al pie
+                if "customer name" in txt_c:
+                    if i + 1 < len(r.cells):
+                        r.cells[i + 1].text = contacto
+                if "engineer name" in txt_c:
+                    if i + 1 < len(r.cells):
+                        r.cells[i + 1].text = ingeniero
+                if "signature date" in txt_c or "fecha de firma" in txt_c:
+                    if i + 1 < len(r.cells):
+                        r.cells[i + 1].text = fecha_reporte
+
+    # 3. Insertar firma digital (busca cualquier nombre de archivo que exista)
+    archivo_firma = None
+    for posible in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
+        if os.path.exists(posible):
+            archivo_firma = posible
+            break
+
+    if archivo_firma:
+        for t in doc.tables:
+            for r_idx, r in enumerate(t.rows):
+                for c_idx, c in enumerate(r.cells):
+                    # Celda que dice Firma (Engineer Signature)
+                    if "engineer signature" in c.text.lower() or "firma\n(engineer signature)" in c.text.lower():
+                        # Si está vacía o es la celda de la firma del ingeniero (columna derecha)
+                        if c_idx >= len(r.cells) // 2:
+                            c.text = ""
+                            p = c.paragraphs[0]
+                            p.add_run().add_picture(archivo_firma, width=Inches(1.3))
+                            break
+
+    # Guardar documento final
+    nombre_docx = f"Reporte_{serie if serie else 'Servicio'}_{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
+    doc.save(nombre_docx)
+
+    with open(nombre_docx, "rb") as f:
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ ¡Reporte generado con éxito!"
+            caption="✅ ¡Reporte generado con formato respetado, datos organizados y firma insertada!"
         )
-        
+
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -536,8 +577,9 @@ def main():
             DETALLES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_detalles)],
             FALLA_TIPO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_falla_tipo)],
             SOLUCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_solucion)],
-            CHECKLIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_checklist)],
-            REPUESTOS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_repuestos)],
+            CHECKLIST_MENU: [CallbackQueryHandler(checklist_callback)],
+            REPUESTOS_OPCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_repuestos_opcion)],
+            REPUESTOS_TEXTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_repuestos_texto)],
             SATISFACCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_satisfaccion)],
             INGENIERO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_ingeniero)],
             FECHA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fecha)],
@@ -549,7 +591,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(conv)
     
-    logger.info("Bot de Reportes en ejecución...")
+    logger.info("Bot de Reportes listo y escuchando...")
     app.run_polling()
 
 if __name__ == "__main__":
