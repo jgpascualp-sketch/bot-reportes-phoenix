@@ -18,6 +18,8 @@ import docx
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_ALIGN_VERTICAL
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -171,10 +173,14 @@ async def get_tipo_servicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_detalles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["detalles"] = update.message.text
     teclado = [
-        ["Fallo Hidráulico", "Fallo en el Circuito"],
-        ["Fallo Mecánico", "Fallo en Software"],
-        ["Fallo en parte de sangre", "Fallo de montaje de pieza"],
-        ["Fallo de desgaste rápido de pieza", "Otros Fallos"],
+        ["Fallo Hidaulico (Hydraulic fault)"],
+        ["Fallo en el Circuito (Circuit fault)"],
+        ["Fallo en parte de sangre (Bloodparts fault)"],
+        ["Fallo en Software (Software fault)"],
+        ["Fallo Mecanico (Mechanical fault)"],
+        ["Fallo de montaje de pieza (Assemble fault)"],
+        ["Fallo de desgaste rápido de pieza (Quick-wear part)"],
+        ["Otros Fallos (Others fault)"],
         ["Ninguno / Normal"]
     ]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
@@ -225,7 +231,7 @@ async def checklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.message.reply_text(f"✅ Se seleccionaron {len(sel)} ítems.")
         teclado = [["Omitir / Todo Vacío"], ["Dejar vacío"]]
         reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-        await query.message.reply_text("⚙️ Registro de componentes:\nIngrese Nombre de la parte (o pulse Omitir):", reply_markup=reply_markup)
+        await query.message.reply_text("⚙️ Registro de componentes:\nIngrese Nombre de la parte (Component name):", reply_markup=reply_markup)
         return REP_PARTE
         
     elif data == "chk_ALL":
@@ -352,6 +358,15 @@ def escribir_con_espacio(celda, texto, negrita=False):
     if negrita:
         run.bold = True
 
+def quitar_linea_vertical(celda_izq, celda_der):
+    """Elimina la línea divisoria vertical entre dos celdas contiguas"""
+    tcPr_i = celda_izq._tc.get_or_add_tcPr()
+    tcPr_d = celda_der._tc.get_or_add_tcPr()
+    border_none_r = parse_xml(f'<w:tcBorders {nsdecls("w")}><w:right w:val="none"/></w:tcBorders>')
+    border_none_l = parse_xml(f'<w:tcBorders {nsdecls("w")}><w:left w:val="none"/></w:tcBorders>')
+    tcPr_i.append(border_none_r)
+    tcPr_d.append(border_none_l)
+
 async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         txt = update.message.text
@@ -416,7 +431,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if any("running" in x or "horometro" in x for x in txt_fila):
                 escribir_con_espacio(r.cells[1], horometro)
                 
-            # Detalles centrado
+            # Detalles
             if any("feedback details" in x or "detalles" in x for x in txt_fila):
                 r.cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 r.cells[0].text = ""
@@ -430,7 +445,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if any("motivo del fallo" in x or "fault reason" in x for x in txt_fila):
                 escribir_con_espacio(r.cells[-1], solucion)
 
-        # 2. Tipo de Servicio (Sin merge conflictivo, escribe limpiamente en sus columnas)
+        # 2. Tipo de Servicio (Título en celda izquierda arriba y línea vertical oculta)
         col1 = [
             ("Mantenimiento Correctivo (Repair)", "correctivo"),
             ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
@@ -446,55 +461,68 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         for r in t.rows:
             if any("service type" in c.text.lower() or "tipo de servicio" in c.text.lower() for c in r.cells):
-                # Título en celda izquierda
-                r.cells[0].text = "Tipo de Servicio\n(Service Type)"
-                r.cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                r.cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                c_izq = r.cells[0] if len(r.cells) == 2 else r.cells[1]
+                c_der = r.cells[-1]
                 
-                c_izq = r.cells[1]
+                # Quitar línea vertical entre izquierda y derecha
+                quitar_linea_vertical(c_izq, c_der)
+                
+                # Columna Izquierda con título arriba
                 c_izq.text = ""
+                p_t = c_izq.paragraphs[0]
+                p_t.paragraph_format.space_before = Pt(0)
+                p_t.paragraph_format.space_after = Pt(2)
+                r_tit = p_t.add_run("Tipo de Servicio (Service Type)\n")
+                r_tit.font.size = Pt(8.5)
+                r_tit.bold = True
+                
                 for idx, (op, clave) in enumerate(col1):
-                    p = c_izq.add_paragraph() if idx > 0 else c_izq.paragraphs[0]
+                    p = c_izq.add_paragraph()
                     p.paragraph_format.space_before = Pt(0)
                     p.paragraph_format.space_after = Pt(0)
                     p.paragraph_format.line_spacing = 1.0
                     sel = clave in tipo_serv.lower()
                     marca = "[ X ]" if sel else "[   ]"
                     run = p.add_run(f"  {op}  {marca}")
-                    run.font.size = Pt(8)
+                    run.font.size = Pt(7.5)
                     if sel:
                         run.bold = True
 
-                c_der = r.cells[-1]
+                # Columna Derecha con espaciado superior idéntico
                 c_der.text = ""
+                p_d_top = c_der.paragraphs[0]
+                p_d_top.paragraph_format.space_before = Pt(0)
+                p_d_top.paragraph_format.space_after = Pt(2)
+                p_d_top.add_run("\n").font.size = Pt(8.5)  # Espacio simétrico al título
+                
                 for idx, (op, clave) in enumerate(col2):
-                    p = c_der.add_paragraph() if idx > 0 else c_der.paragraphs[0]
+                    p = c_der.add_paragraph()
                     p.paragraph_format.space_before = Pt(0)
                     p.paragraph_format.space_after = Pt(0)
                     p.paragraph_format.line_spacing = 1.0
                     sel = clave in tipo_serv.lower()
                     marca = "[ X ]" if sel else "[   ]"
                     run = p.add_run(f"  {op}  {marca}")
-                    run.font.size = Pt(8)
+                    run.font.size = Pt(7.5)
                     if sel:
                         run.bold = True
                 break
 
-        # 3. Clasificación de Fallas
+        # 3. Clasificación de Fallas (Nombres literales de la plantilla)
         fallas_lista = [
-            ("Fallo Hidaulico\n(Hydraulic fault)", ["hid", "aulic"]),
-            ("Fallo en el Circuito\n(Circuit fault)", ["circu"]),
-            ("Fallo en parte de sangre\n(Bloodparts fault)", ["sangr", "blood"]),
-            ("Fallo en Software\n(Software fault)", ["softw"]),
-            ("Fallo Mecanico\n(Mechanical fault)", ["mecan", "mechan"]),
-            ("Fallo de montaje de pieza\n(Assemble fault)", ["montaj", "assemb"]),
-            ("Fallo de desgaste rápido de pieza\n(Quick-wear part)", ["desgast", "quick"]),
-            ("Otros Fallos\n(Others fault)", ["otro", "other"])
+            ("Fallo Hidaulico\n(Hydraulic fault)", ["hidaulico", "hydraulic fault", "hidráulico", "hidraulico"]),
+            ("Fallo en el Circuito\n(Circuit fault)", ["circuito", "circuit fault"]),
+            ("Fallo en parte de sangre\n(Bloodparts fault)", ["sangre", "bloodparts fault"]),
+            ("Fallo en Software\n(Software fault)", ["software", "software fault"]),
+            ("Fallo Mecanico\n(Mechanical fault)", ["mecanico", "mechanical fault", "mecánico"]),
+            ("Fallo de montaje de pieza\n(Assemble fault)", ["montaje", "assemble fault"]),
+            ("Fallo de desgaste rápido de pieza\n(Quick-wear part)", ["desgaste", "quick-wear part"]),
+            ("Otros Fallos\n(Others fault)", ["otros fallos", "others fault"])
         ]
 
         for r in t.rows:
             txt_r = " ".join([c.text.lower() for c in r.cells])
-            if any(k in txt_r for k in ["aulic", "circu", "mecan", "blood", "clasificación de fallas"]):
+            if any(k in txt_r for k in ["hidaulico", "hydraulic", "circuito", "mecanico", "sangre", "clasificación de fallas"]):
                 for c in r.cells:
                     txt_c = c.text.lower()
                     for nombre, patrones in fallas_lista:
@@ -519,7 +547,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ("Placa Hall o Tarjeta electronica", ["placa", "hall", "pcb"]),
             ("Señal de sensor (Sensor signal)", ["señal", "signal"]),
             ("Pantalla táctil (Touch screen)", ["pantalla", "touch"]),
-            ("Pieza hidráulica (Hydraulic parts)", ["pieza", "hydraulic parts"]),
+            ("Pieza hidráulica (Hydraulic parts)", ["pieza hidráulica", "hydraulic parts", "pieza"]),
             ("Parametros de Tratamiento", ["parametr", "treatment parameters"]),
             ("Sim. de Tratamiento (Simulation treatme)", ["sim.", "simulation"]),
             ("Opciones (Options)", ["opcion", "options"]),
@@ -552,18 +580,25 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 run.bold = True
                             break
 
-        # 5. Registro de Componentes
+        # 5. Registro de Componentes (Fila exacta debajo de Nombre de la parte | Cantidad | Observación)
         if rep_p or rep_c or rep_o:
+            idx_head = None
             for i_r, r_obj in enumerate(t.rows):
                 txt_row = " ".join([c.text.lower() for c in r_obj.cells])
                 if "component name" in txt_row or "nombre de la parte" in txt_row:
-                    if i_r + 1 < len(t.rows):
-                        fila_target = t.rows[i_r + 1]
-                        if len(fila_target.cells) >= 3:
-                            escribir_con_espacio(fila_target.cells[0], rep_p)
-                            escribir_con_espacio(fila_target.cells[1], rep_c)
-                            escribir_con_espacio(fila_target.cells[2], rep_o)
+                    idx_head = i_r
                     break
+
+            if idx_head is not None and idx_head + 1 < len(t.rows):
+                fila_datos = t.rows[idx_head + 1]
+                # Escribir en las 3 columnas de datos directas
+                if len(fila_datos.cells) >= 3:
+                    if rep_p:
+                        escribir_con_espacio(fila_datos.cells[0], rep_p)
+                    if rep_c:
+                        escribir_con_espacio(fila_datos.cells[1], rep_c)
+                    if rep_o:
+                        escribir_con_espacio(fila_datos.cells[2], rep_o)
 
         # 6. Encuesta de Satisfacción
         opciones_sat = [
