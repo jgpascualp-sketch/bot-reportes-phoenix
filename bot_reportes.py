@@ -45,7 +45,7 @@ def iniciar_servidor_web():
     servidor = HTTPServer(("0.0.0.0", puerto), HealthHandler)
     servidor.serve_forever()
 
-# Búsqueda en Google Sheets
+# Google Sheets Autocompletado
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 def buscar_historial(busqueda):
@@ -109,10 +109,10 @@ ITEMS_CHECKLIST = [
     FALLA_TIPO,
     SOLUCION,
     CHECKLIST_MENU,
-    REPUESTOS_OPCION,
-    REPUESTOS_TEXTO,
     SATISFACCION,
     INGENIERO,
+    OPCION_FIRMA,
+    SUBIR_FIRMA,
     FECHA,
     MONEDA,
 ) = range(21)
@@ -216,7 +216,7 @@ async def get_version_sw(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ["Mantenimiento Correctivo (Repair)"],
         ["Mantenimiento Preventivo (PM)"],
         ["Instalación (Installation)"],
-        ["Diagnostico"],
+        ["Diagnostico (Diagnostic / Inspection)"],
         ["Entrenamiento (Operation training)"],
         ["Seguimiento Tratamiento"],
         ["Otro (Other)"]
@@ -271,7 +271,7 @@ async def get_solucion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     markup = armar_teclado_checklist(context.user_data["checklist_seleccionados"])
     await update.message.reply_text(
-        "📋 Lista de verificación de pruebas:\nSeleccione los ítems que desea marcar con ✔ y presione 'LISTO / CONTINUAR':",
+        "📋 Lista de verificación de pruebas:\nToque los ítems que desea marcar con ✔ y presione 'LISTO / CONTINUAR':",
         reply_markup=markup
     )
     return CHECKLIST_MENU
@@ -283,11 +283,17 @@ async def checklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     sel = context.user_data.get("checklist_seleccionados", [])
     
     if data == "chk_DONE":
-        await query.message.reply_text(f"✅ Se registraron {len(sel)} comprobaciones en la lista de verificación.")
-        teclado = [["Dejar vacío"], ["Ingresar componentes reemplazados"]]
+        await query.message.reply_text(f"✅ Se seleccionaron {len(sel)} ítems.")
+        teclado = [
+            ["Satisfecho (Satisfied)"],
+            ["Relativamente satisfecho"],
+            ["Normal (Normal)"],
+            ["Insatisfecho (Dissatisfied)"],
+            ["Muy Insatisfecho (Very Dissatisfied)"]
+        ]
         reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-        await query.message.reply_text("⚙️ Registro de reemplazo de componentes:", reply_markup=reply_markup)
-        return REPUESTOS_OPCION
+        await query.message.reply_text("⭐ Encuesta de satisfacción / Opinión de usuario:", reply_markup=reply_markup)
+        return SATISFACCION
         
     elif data == "chk_ALL":
         context.user_data["checklist_seleccionados"] = list(ITEMS_CHECKLIST)
@@ -301,39 +307,6 @@ async def checklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await query.edit_message_reply_markup(reply_markup=armar_teclado_checklist(context.user_data["checklist_seleccionados"]))
     return CHECKLIST_MENU
-
-async def get_repuestos_opcion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text == "Dejar vacío":
-        context.user_data["repuestos_txt"] = ""
-        teclado = [
-            ["Satisfecho (Satisfied)"],
-            ["Relativamente satisfecho"],
-            ["Normal (Normal)"],
-            ["Insatisfecho (Dissatisfied)"],
-            ["Muy Insatisfecho (Very Dissatisfied)"]
-        ]
-        reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-        await update.message.reply_text("⭐ Encuesta de satisfacción / Opinión de usuario:", reply_markup=reply_markup)
-        return SATISFACCION
-    else:
-        await update.message.reply_text(
-            "Escriba los componentes en formato:\nNombre de la parte | Cantidad | Observación",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return REPUESTOS_TEXTO
-
-async def get_repuestos_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["repuestos_txt"] = update.message.text
-    teclado = [
-        ["Satisfecho (Satisfied)"],
-        ["Relativamente satisfecho"],
-        ["Normal (Normal)"],
-        ["Insatisfecho (Dissatisfied)"],
-        ["Muy Insatisfecho (Very Dissatisfied)"]
-    ]
-    reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("⭐ Encuesta de satisfacción / Opinión de usuario:", reply_markup=reply_markup)
-    return SATISFACCION
 
 async def get_satisfaccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["satisfaccion"] = update.message.text
@@ -349,10 +322,35 @@ async def get_ingeniero(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return INGENIERO
     context.user_data["ingeniero"] = txt
     
+    teclado = [["🖊️ Firma Automática (Jesús Pascual)"], ["📷 Subir Foto de Firma"]]
+    reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
+    await update.message.reply_text("🖋️ ¿Cómo desea estampar la firma?", reply_markup=reply_markup)
+    return OPCION_FIRMA
+
+async def get_opcion_firma(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text
+    if "Subir Foto" in txt:
+        await update.message.reply_text("📸 Por favor envíe la FOTO de la firma como imagen:", reply_markup=ReplyKeyboardRemove())
+        return SUBIR_FIRMA
+    
+    # Firma automática predeterminada
+    context.user_data["firma_custom"] = None
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
     teclado = [[fecha_hoy], ["Ingresar otra fecha"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text("📅 Fecha del reporte (seleccione o edite):", reply_markup=reply_markup)
+    return FECHA
+
+async def get_foto_firma(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    foto = await update.message.photo[-1].get_file()
+    ruta_temp = "firma_subida.png"
+    await foto.download_to_drive(ruta_temp)
+    context.user_data["firma_custom"] = ruta_temp
+    
+    fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+    teclado = [[fecha_hoy], ["Ingresar otra fecha"]]
+    reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
+    await update.message.reply_text("✅ Firma recibida. 📅 Confirme la fecha del reporte:", reply_markup=reply_markup)
     return FECHA
 
 async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -367,29 +365,34 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💵 Moneda y cobro:", reply_markup=reply_markup)
     return MONEDA
 
-def marcar_derecha(texto, palabra_clave, marca="☒"):
-    """Ubica la casilla a la derecha del texto correspondiente sin duplicar"""
-    lineas = texto.split("\n")
-    salida = []
-    aplicado = False
-    for l in lineas:
-        if palabra_clave.lower() in l.lower() and not aplicado:
-            for s in ["□", "☐", "⬜", "[ ]", "[]"]:
-                if s in l:
-                    l = l.replace(s, marca, 1)
-                    aplicado = True
-                    break
-            if not aplicado:
-                l = f"{l} {marca}"
-                aplicado = True
-        salida.append(l)
-    return "\n".join(salida)
+def marcar_simbolo_en_celda(celda, palabra_clave, simbolo="☒"):
+    """Reemplaza los caracteres de caja cuadrada por el símbolo deseado en la opción seleccionada"""
+    cajas = ["□", "☐", "⬜", "[ ]", "[]", "\u25a1", "\u25fb", "\u2610"]
+    clave = palabra_clave.lower().strip()
+    
+    for p in celda.paragraphs:
+        if clave in p.text.lower():
+            # Buscar primero en runs individuales
+            for r in p.runs:
+                for cj in cajas:
+                    if cj in r.text:
+                        r.text = r.text.replace(cj, simbolo, 1)
+                        return True
+            # Si el run no tenía el cuadro por separado
+            for cj in cajas:
+                if cj in p.text:
+                    p.text = p.text.replace(cj, simbolo, 1)
+                    return True
+            # Si no había carácter gráfico, ponerlo al inicio
+            p.text = f"{simbolo} {p.text}"
+            return True
+    return False
 
 async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["moneda"] = "" if txt == "Dejar vacío" else txt
     
-    await update.message.reply_text("⏳ Procesando reporte...")
+    await update.message.reply_text("⏳ Procesando reporte Word...")
     
     plantilla = "1-TECHNICAL SERVICE REPORT.docx"
     if not os.path.exists(plantilla):
@@ -413,11 +416,10 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     falla_tipo = context.user_data.get("falla_tipo", "")
     satisfaccion = context.user_data.get("satisfaccion", "")
     checklist_sel = context.user_data.get("checklist_seleccionados", [])
-    repuestos_txt = context.user_data.get("repuestos_txt", "")
     ingeniero = context.user_data.get("ingeniero", "Jesus Guillermo Pascual chalan")
     fecha_reporte = context.user_data.get("fecha", datetime.now().strftime("%d/%m/%Y"))
 
-    # Consecutivo en encabezado
+    # Consecutivo
     if consecutivo:
         for p in doc.paragraphs:
             if "consecutivo" in p.text.lower():
@@ -425,67 +427,54 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
 
     t = doc.tables[0]
-    
-    # Fila 0: Nombre del Cliente
+
+    # Fila 0: Hospital
     for c in t.rows[0].cells:
         if "hospital name" in c.text.lower():
             continue
         c.text = hosp
         break
 
-    # Fila 1: Contacto y Teléfono por detección directa de encabezado
-    celdas_r1 = t.rows[1].cells
-    for i, c in enumerate(celdas_r1):
-        if "contact" in c.text.lower() and i + 1 < len(celdas_r1):
-            celdas_r1[i + 1].text = contacto
-        if "phone" in c.text.lower() and i + 1 < len(celdas_r1):
-            celdas_r1[i + 1].text = telefono
+    # Fila 1: Contacto y Teléfono en la celda derecha de la casilla
+    # Fila 1 tiene 4 o 5 celdas: [Etiqueta Contacto | Valor Contacto | Etiqueta Teléfono | Valor Teléfono]
+    r1 = t.rows[1].cells
+    r1[1].text = contacto
+    r1[-1].text = telefono
 
     # Fila 2: Dirección
     for c in t.rows[2].cells:
-        if "adress" in c.text.lower() or "dirección" in c.text.lower():
+        if "dirección" in c.text.lower() or "adress" in c.text.lower():
             continue
         c.text = direccion
         break
 
-    # Fila 3: Modelo y Versión de Software por detección directa
-    celdas_r3 = t.rows[3].cells
-    for i, c in enumerate(celdas_r3):
-        if "model" in c.text.lower() and "version" not in c.text.lower() and i + 1 < len(celdas_r3):
-            celdas_r3[i + 1].text = modelo
-        if ("version" in c.text.lower() or "operating" in c.text.lower()) and i + 1 < len(celdas_r3):
-            celdas_r3[i + 1].text = version_sw
+    # Fila 3: Modelo y Versión en la celda derecha
+    r3 = t.rows[3].cells
+    r3[1].text = modelo
+    r3[-1].text = version_sw
 
     # Fila 4: Serie
-    for c in t.rows[4].cells:
-        if "serial" in c.text.lower():
-            continue
-        c.text = serie
-        break
+    t.rows[4].cells[1].text = serie
 
     # Fila 5: Horómetro
-    for c in t.rows[5].cells:
-        if "running" in c.text.lower() or "horometro" in c.text.lower():
-            continue
-        c.text = horometro
-        break
+    t.rows[5].cells[1].text = horometro
 
-    # Fila 6: Tipo de Servicio (marcando la casilla a la derecha)
+    # Fila 6: Tipo de Servicio (Marcar la caja de la opción elegida)
     c_serv = t.rows[6].cells[-1] if len(t.rows[6].cells) > 1 else t.rows[6].cells[0]
     palabra_ts = tipo_serv.split()[0]
-    c_serv.text = marcar_derecha(c_serv.text, palabra_ts, "☒")
+    marcar_simbolo_en_celda(c_serv, palabra_ts, "☒")
 
     # Fila 7: Detalles
     c_det = t.rows[7].cells[-1] if len(t.rows[7].cells) > 1 else t.rows[7].cells[0]
     c_det.text = detalles
 
-    # Fila 8: Clasificación de fallas
+    # Fila 8: Clasificación de Fallas
     if falla_tipo and falla_tipo != "Ninguno / Normal":
         for c in t.rows[8].cells:
             if falla_tipo.lower() in c.text.lower():
-                c.text = marcar_derecha(c.text, falla_tipo, "☒")
+                marcar_simbolo_en_celda(c, falla_tipo, "☒")
 
-    # Fila 9: Motivo del Fallo y Solución
+    # Fila 9: Motivo del Fallo y Solución (celda grande de la fila 9)
     c_sol = t.rows[9].cells[-1] if len(t.rows[9].cells) > 1 else t.rows[9].cells[0]
     c_sol.text = solucion
 
@@ -493,18 +482,13 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for c in t.rows[10].cells:
         for chk in checklist_sel:
             if chk.lower() in c.text.lower():
-                c.text = marcar_derecha(c.text, chk, "☑")
-
-    # Fila 11: Reemplazo de componentes
-    if repuestos_txt:
-        c_rep = t.rows[11].cells[-1] if len(t.rows[11].cells) > 1 else t.rows[11].cells[0]
-        c_rep.text = repuestos_txt
+                marcar_simbolo_en_celda(c, chk, "☑")
 
     # Fila 12: Encuesta de satisfacción
     if satisfaccion:
         c_sat = t.rows[12].cells[-1] if len(t.rows[12].cells) > 1 else t.rows[12].cells[0]
         palabra_sat = satisfaccion.split()[0]
-        c_sat.text = marcar_derecha(c_sat.text, palabra_sat, "☒")
+        marcar_simbolo_en_celda(c_sat, palabra_sat, "☒")
 
     # Tabla 1: Firmas y Nombres
     t2 = doc.tables[1]
@@ -513,14 +497,15 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     t2.rows[2].cells[1].text = fecha_reporte
     t2.rows[2].cells[3].text = fecha_reporte
 
-    # Firma del ingeniero: centrada vertical y horizontalmente
-    archivo_firma = None
-    for f_nom in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
-        if os.path.exists(f_nom):
-            archivo_firma = f_nom
-            break
+    # Determinar qué firma usar
+    archivo_firma = context.user_data.get("firma_custom")
+    if not archivo_firma:
+        for f_nom in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
+            if os.path.exists(f_nom):
+                archivo_firma = f_nom
+                break
 
-    if archivo_firma:
+    if archivo_firma and os.path.exists(archivo_firma):
         cell_sig = t2.rows[1].cells[3]
         cell_sig.text = ""
         cell_sig.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
@@ -535,7 +520,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(
             chat_id=update.effective_chat.id,
             document=f,
-            caption="✅ Reporte generado: celdas alineadas, marcas a la derecha y firma centrada."
+            caption="✅ Reporte generado: Teléfono y versión al costado, marcas ☒ y ☑ exactas, solución en su celda y firma configurada."
         )
 
     return ConversationHandler.END
@@ -574,10 +559,10 @@ def main():
             FALLA_TIPO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_falla_tipo)],
             SOLUCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_solucion)],
             CHECKLIST_MENU: [CallbackQueryHandler(checklist_callback)],
-            REPUESTOS_OPCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_repuestos_opcion)],
-            REPUESTOS_TEXTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_repuestos_texto)],
             SATISFACCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_satisfaccion)],
             INGENIERO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_ingeniero)],
+            OPCION_FIRMA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_opcion_firma)],
+            SUBIR_FIRMA: [MessageHandler(filters.PHOTO, get_foto_firma)],
             FECHA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fecha)],
             MONEDA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_moneda)],
         },
