@@ -576,7 +576,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 run.bold = True
                             break
 
-        # 5. Registro de Componentes (Alineación con el desfase de columnas)
+        # 5. Registro de Componentes (Desplazamiento a la columna exacta de cada campo)
         if rep_p or rep_c or rep_o:
             idx_head = None
             for i_r, r_obj in enumerate(t.rows):
@@ -588,20 +588,27 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if idx_head is not None and idx_head + 1 < len(t.rows):
                 fila_datos = t.rows[idx_head + 1]
                 
-                c_nombre = fila_datos.cells[0]
-                c_cant = fila_datos.cells[1]
-                c_obs = fila_datos.cells[2]
-                
+                # Para evitar que caiga en la celda anterior, se corre un índice a la derecha:
+                # Si la fila tiene 3 celdas (debido al rowspan):
+                #   celda [1] = Nombre de la parte
+                #   celda [2] = Cantidad
+                # Si la fila tiene 4 celdas:
+                #   celda [2] = Nombre de la parte
+                #   celda [3] = Cantidad
                 if len(fila_datos.cells) >= 4:
+                    c_nombre = fila_datos.cells[2]
+                    c_cant = fila_datos.cells[3] if len(fila_datos.cells) > 3 else None
+                    c_obs = fila_datos.cells[-1] if len(fila_datos.cells) > 4 else None
+                else:
                     c_nombre = fila_datos.cells[1]
-                    c_cant = fila_datos.cells[2]
-                    c_obs = fila_datos.cells[3]
+                    c_cant = fila_datos.cells[2] if len(fila_datos.cells) > 2 else None
+                    c_obs = None
 
-                if rep_p:
+                if rep_p and c_nombre:
                     escribir_con_espacio(c_nombre, rep_p)
-                if rep_c:
+                if rep_c and c_cant:
                     escribir_con_espacio(c_cant, rep_c)
-                if rep_o:
+                if rep_o and c_obs:
                     escribir_con_espacio(c_obs, rep_o)
 
         # 6. Encuesta de Satisfacción
