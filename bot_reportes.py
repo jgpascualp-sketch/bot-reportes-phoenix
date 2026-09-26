@@ -86,8 +86,9 @@ ITEMS_CHECKLIST = [
     OPCION_FIRMA,
     SUBIR_FIRMA,
     FECHA,
+    CUSTOMER_NAME,
     MONEDA,
-) = range(23)
+) = range(24)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Usa /reporte para generar un nuevo reporte técnico.")
@@ -103,12 +104,12 @@ async def iniciar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_consecutivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     context.user_data["consecutivo"] = "" if txt == "Dejar vacío" else txt
-    await update.message.reply_text("🏥 Ingrese Nombre de la Clínica / Hospital:", reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text("🏥 Ingrese Nombre de la Clínica / Hospital (Hospital Name):", reply_markup=ReplyKeyboardRemove())
     return HOSPITAL
 
 async def get_hospital(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["hospital"] = update.message.text
-    await update.message.reply_text("👤 Ingrese Nombre del Contacto:")
+    await update.message.reply_text("👤 Ingrese Nombre del Contacto (Contact):")
     return CONTACTO
 
 async def get_contacto(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -343,6 +344,32 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return FECHA
     context.user_data["fecha"] = txt
     
+    # Preguntar si Customer Name es igual al Hospital Name
+    hosp = context.user_data.get("hospital", "")
+    teclado = [
+        ["Sí, mismo que Hospital Name"],
+        ["Dejar vacío"]
+    ]
+    reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
+    await update.message.reply_text(
+        f"👤 En la firma inferior (Customer Name):\n"
+        f"¿Es el mismo nombre que Hospital Name ({hosp})?\n\n"
+        f"• Presione 'Sí, mismo que Hospital Name'\n"
+        f"• Presione 'Dejar vacío'\n"
+        f"• O escriba el nombre del cliente directamente:",
+        reply_markup=reply_markup
+    )
+    return CUSTOMER_NAME
+
+async def get_customer_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    txt = update.message.text
+    if txt == "Sí, mismo que Hospital Name":
+        context.user_data["customer_name"] = context.user_data.get("hospital", "")
+    elif txt == "Dejar vacío":
+        context.user_data["customer_name"] = ""
+    else:
+        context.user_data["customer_name"] = txt
+
     teclado = [["Dejar vacío"], ["Soles (S/.)"], ["USD ($)"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text("💵 Moneda y cobro:", reply_markup=reply_markup)
@@ -384,6 +411,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         consecutivo = context.user_data.get("consecutivo", "")
         hosp = context.user_data.get("hospital", "")
         contacto = context.user_data.get("contacto", "")
+        customer_name = context.user_data.get("customer_name", hosp)
         telefono = context.user_data.get("telefono", "")
         direccion = context.user_data.get("direccion", "")
         modelo = context.user_data.get("modelo", "")
@@ -588,13 +616,6 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if idx_head is not None and idx_head + 1 < len(t.rows):
                 fila_datos = t.rows[idx_head + 1]
                 
-                # Para evitar que caiga en la celda anterior, se corre un índice a la derecha:
-                # Si la fila tiene 3 celdas (debido al rowspan):
-                #   celda [1] = Nombre de la parte
-                #   celda [2] = Cantidad
-                # Si la fila tiene 4 celdas:
-                #   celda [2] = Nombre de la parte
-                #   celda [3] = Cantidad
                 if len(fila_datos.cells) >= 4:
                     c_nombre = fila_datos.cells[2]
                     c_cant = fila_datos.cells[3] if len(fila_datos.cells) > 3 else None
@@ -650,7 +671,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for r in t_firmas.rows:
             txt_r = [c.text.lower() for c in r.cells]
             if any("customer name" in x for x in txt_r) or any("nombre del cliente" in x for x in txt_r):
-                escribir_con_espacio(r.cells[1], contacto)
+                escribir_con_espacio(r.cells[1], customer_name)
                 escribir_con_espacio(r.cells[3], ingeniero)
             if any("signature date" in x for x in txt_r) or any("fecha de firma" in x for x in txt_r):
                 escribir_con_espacio(r.cells[1], fecha_reporte)
@@ -733,6 +754,7 @@ def main():
             OPCION_FIRMA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_opcion_firma)],
             SUBIR_FIRMA: [MessageHandler(filters.PHOTO, get_foto_firma)],
             FECHA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fecha)],
+            CUSTOMER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_customer_name)],
             MONEDA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_moneda)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
