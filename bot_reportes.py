@@ -87,8 +87,9 @@ ITEMS_CHECKLIST = [
     SUBIR_FIRMA,
     FECHA,
     CUSTOMER_NAME,
+    FIRMA_CLIENTE,
     MONEDA,
-) = range(24)
+) = range(25)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 Usa /reporte para generar un nuevo reporte técnico.")
@@ -309,13 +310,13 @@ async def get_ingeniero(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     teclado = [["🖊️ Firma Automática (Jesús Pascual)"], ["📷 Subir Foto de Firma"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("🖋️ ¿Cómo desea estampar la firma?", reply_markup=reply_markup)
+    await update.message.reply_text("🖋️ ¿Cómo desea estampar la firma del ingeniero?", reply_markup=reply_markup)
     return OPCION_FIRMA
 
 async def get_opcion_firma(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
     if "Subir Foto" in txt:
-        await update.message.reply_text("📸 Envíe la FOTO de la firma como imagen:", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text("📸 Envíe la FOTO de la firma del ingeniero como imagen:", reply_markup=ReplyKeyboardRemove())
         return SUBIR_FIRMA
     
     context.user_data["firma_custom"] = None
@@ -344,7 +345,6 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return FECHA
     context.user_data["fecha"] = txt
     
-    # Preguntar si Customer Name es igual al Contacto
     cont = context.user_data.get("contacto", "")
     teclado = [
         ["Sí, mismo que Contacto"],
@@ -369,6 +369,25 @@ async def get_customer_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["customer_name"] = ""
     else:
         context.user_data["customer_name"] = txt
+
+    # Preguntar por la firma del cliente
+    teclado = [["Dejar vacío"]]
+    reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
+    await update.message.reply_text(
+        "✍️ Firma del Cliente (Customer Signature):\n"
+        "Envíe la FOTO de la firma del cliente, o presione 'Dejar vacío':",
+        reply_markup=reply_markup
+    )
+    return FIRMA_CLIENTE
+
+async def get_firma_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.photo:
+        foto = await update.message.photo[-1].get_file()
+        ruta_temp_cliente = "firma_cliente_subida.png"
+        await foto.download_to_drive(ruta_temp_cliente)
+        context.user_data["firma_cliente"] = ruta_temp_cliente
+    else:
+        context.user_data["firma_cliente"] = None
 
     teclado = [["Dejar vacío"], ["Soles (S/.)"], ["USD ($)"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
@@ -412,6 +431,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         hosp = context.user_data.get("hospital", "")
         contacto = context.user_data.get("contacto", "")
         customer_name = context.user_data.get("customer_name", contacto)
+        firma_cliente_archivo = context.user_data.get("firma_cliente")
         telefono = context.user_data.get("telefono", "")
         direccion = context.user_data.get("direccion", "")
         modelo = context.user_data.get("modelo", "")
@@ -677,6 +697,21 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 escribir_con_espacio(r.cells[1], fecha_reporte)
                 escribir_con_espacio(r.cells[3], fecha_reporte)
 
+        # Firma del Cliente (si se subió foto)
+        if firma_cliente_archivo and os.path.exists(firma_cliente_archivo):
+            for r in t_firmas.rows:
+                if any("customer signature" in c.text.lower() or "firma" in c.text.lower() for c in r.cells):
+                    cell_sig_cli = r.cells[1]
+                    cell_sig_cli.text = ""
+                    cell_sig_cli.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                    p_cli = cell_sig_cli.paragraphs[0]
+                    p_cli.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    p_cli.paragraph_format.space_before = Pt(0)
+                    p_cli.paragraph_format.space_after = Pt(0)
+                    p_cli.add_run().add_picture(firma_cliente_archivo, width=Inches(1.1))
+                    break
+
+        # Firma del Ingeniero
         archivo_firma = context.user_data.get("firma_custom")
         if not archivo_firma:
             for f_nom in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
@@ -755,6 +790,10 @@ def main():
             SUBIR_FIRMA: [MessageHandler(filters.PHOTO, get_foto_firma)],
             FECHA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fecha)],
             CUSTOMER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_customer_name)],
+            FIRMA_CLIENTE: [
+                MessageHandler(filters.PHOTO, get_firma_cliente),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_firma_cliente)
+            ],
             MONEDA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_moneda)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
