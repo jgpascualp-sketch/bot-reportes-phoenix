@@ -344,17 +344,17 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return FECHA
     context.user_data["fecha"] = txt
     
-    # Preguntar si Customer Name es igual al Hospital Name
-    hosp = context.user_data.get("hospital", "")
+    # Preguntar si Customer Name es igual al Contacto
+    cont = context.user_data.get("contacto", "")
     teclado = [
-        ["Sí, mismo que Hospital Name"],
+        ["Sí, mismo que Contacto"],
         ["Dejar vacío"]
     ]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text(
         f"👤 En la firma inferior (Customer Name):\n"
-        f"¿Es el mismo nombre que Hospital Name ({hosp})?\n\n"
-        f"• Presione 'Sí, mismo que Hospital Name'\n"
+        f"¿Es el mismo nombre que Contacto ({cont})?\n\n"
+        f"• Presione 'Sí, mismo que Contacto'\n"
         f"• Presione 'Dejar vacío'\n"
         f"• O escriba el nombre del cliente directamente:",
         reply_markup=reply_markup
@@ -363,8 +363,8 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_customer_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text
-    if txt == "Sí, mismo que Hospital Name":
-        context.user_data["customer_name"] = context.user_data.get("hospital", "")
+    if txt == "Sí, mismo que Contacto":
+        context.user_data["customer_name"] = context.user_data.get("contacto", "")
     elif txt == "Dejar vacío":
         context.user_data["customer_name"] = ""
     else:
@@ -411,7 +411,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         consecutivo = context.user_data.get("consecutivo", "")
         hosp = context.user_data.get("hospital", "")
         contacto = context.user_data.get("contacto", "")
-        customer_name = context.user_data.get("customer_name", hosp)
+        customer_name = context.user_data.get("customer_name", contacto)
         telefono = context.user_data.get("telefono", "")
         direccion = context.user_data.get("direccion", "")
         modelo = context.user_data.get("modelo", "")
