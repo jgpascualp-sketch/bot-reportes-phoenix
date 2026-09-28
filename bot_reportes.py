@@ -103,56 +103,56 @@ async def iniciar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CONSECUTIVO
 
 async def get_consecutivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text
-    context.user_data["consecutivo"] = "" if txt == "Dejar vacío" else txt
+    txt = update.message.text.strip()
+    context.user_data["consecutivo"] = "" if txt == "Dejar vacío" else txt.upper()
     await update.message.reply_text("🏥 Ingrese Nombre de la Clínica / Hospital (Hospital Name):", reply_markup=ReplyKeyboardRemove())
     return HOSPITAL
 
 async def get_hospital(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["hospital"] = update.message.text
+    context.user_data["hospital"] = update.message.text.strip().upper()
     await update.message.reply_text("👤 Ingrese Nombre del Contacto (Contact):")
     return CONTACTO
 
 async def get_contacto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["contacto"] = update.message.text
+    context.user_data["contacto"] = update.message.text.strip().upper()
     await update.message.reply_text("📞 Ingrese Número de Teléfono:")
     return TELEFONO
 
 async def get_telefono(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["telefono"] = update.message.text
+    context.user_data["telefono"] = update.message.text.strip().upper()
     await update.message.reply_text("📍 Ingrese Dirección:")
     return DIRECCION
 
 async def get_direccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["direccion"] = update.message.text
+    context.user_data["direccion"] = update.message.text.strip().upper()
     teclado = [["DORA-6000"], ["Otro"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text("🤖 Seleccione o ingrese Modelo:", reply_markup=reply_markup)
     return MODELO
 
 async def get_modelo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["modelo"] = update.message.text
+    context.user_data["modelo"] = update.message.text.strip().upper()
     await update.message.reply_text("🔢 Ingrese Serial No.:", reply_markup=ReplyKeyboardRemove())
     return SERIE
 
 async def get_serie(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["serie"] = update.message.text
+    context.user_data["serie"] = update.message.text.strip().upper()
     teclado = [["Dejar vacío"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text("⏱️ Ingrese Horómetro o pulse Dejar vacío:", reply_markup=reply_markup)
     return HOROMETRO
 
 async def get_horometro(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text
-    context.user_data["horometro"] = "" if txt == "Dejar vacío" else txt
+    txt = update.message.text.strip()
+    context.user_data["horometro"] = "" if txt == "Dejar vacío" else txt.upper()
     teclado = [["020305"], ["Dejar vacío"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text("💻 Ingrese Versión de Software:", reply_markup=reply_markup)
     return VERSION_SW
 
 async def get_version_sw(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text
-    context.user_data["version_sw"] = "" if txt == "Dejar vacío" else txt
+    txt = update.message.text.strip()
+    context.user_data["version_sw"] = "" if txt == "Dejar vacío" else txt.upper()
     teclado = [
         ["Mantenimiento Correctivo (Repair)"],
         ["Mantenimiento Preventivo (PM)"],
@@ -168,12 +168,12 @@ async def get_version_sw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return TIPO_SERVICIO
 
 async def get_tipo_servicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["tipo_servicio"] = update.message.text
+    context.user_data["tipo_servicio"] = update.message.text.strip()
     await update.message.reply_text("📝 Ingrese Detalles / Feedback Details:", reply_markup=ReplyKeyboardRemove())
     return DETALLES
 
 async def get_detalles(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["detalles"] = update.message.text
+    context.user_data["detalles"] = update.message.text.strip().upper()
     teclado = [
         ["Fallo Hidaulico (Hydraulic fault)"],
         ["Fallo en el Circuito (Circuit fault)"],
@@ -190,7 +190,7 @@ async def get_detalles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return FALLA_TIPO
 
 async def get_falla_tipo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["falla_tipo"] = update.message.text
+    context.user_data["falla_tipo"] = update.message.text.strip()
     teclado = [["Dejar vacío"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text("💡 Ingrese Motivo del Fallo y Solución:", reply_markup=reply_markup)
@@ -213,8 +213,8 @@ def armar_teclado_checklist(seleccionados):
     return InlineKeyboardMarkup(botones)
 
 async def get_solucion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text
-    context.user_data["solucion"] = "" if txt == "Dejar vacío" else txt
+    txt = update.message.text.strip()
+    context.user_data["solucion"] = "" if txt == "Dejar vacío" else txt.upper()
     
     markup = armar_teclado_checklist(context.user_data["checklist_seleccionados"])
     await update.message.reply_text(
@@ -250,7 +250,7 @@ async def checklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return CHECKLIST_MENU
 
 async def get_rep_parte(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text
+    txt = update.message.text.strip()
     if txt == "Omitir / Todo Vacío":
         context.user_data["rep_parte"] = ""
         context.user_data["rep_cant"] = ""
@@ -266,23 +266,23 @@ async def get_rep_parte(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⭐ Encuesta de satisfacción / Opinión de usuario:", reply_markup=reply_markup)
         return SATISFACCION
         
-    context.user_data["rep_parte"] = "" if txt == "Dejar vacío" else txt
+    context.user_data["rep_parte"] = "" if txt == "Dejar vacío" else txt.upper()
     teclado = [["Dejar vacío"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text("⚙️ Ingrese Cantidad (Quantity):", reply_markup=reply_markup)
     return REP_CANT
 
 async def get_rep_cant(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text
-    context.user_data["rep_cant"] = "" if txt == "Dejar vacío" else txt
+    txt = update.message.text.strip()
+    context.user_data["rep_cant"] = "" if txt == "Dejar vacío" else txt.upper()
     teclado = [["Dejar vacío"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text("⚙️ Ingrese Observación (Remark):", reply_markup=reply_markup)
     return REP_OBS
 
 async def get_rep_obs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text
-    context.user_data["rep_obs"] = "" if txt == "Dejar vacío" else txt
+    txt = update.message.text.strip()
+    context.user_data["rep_obs"] = "" if txt == "Dejar vacío" else txt.upper()
     teclado = [
         ["Satisfecho (Satisfied)"],
         ["Relativamente satisfecho"],
@@ -295,18 +295,18 @@ async def get_rep_obs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SATISFACCION
 
 async def get_satisfaccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["satisfaccion"] = update.message.text
+    context.user_data["satisfaccion"] = update.message.text.strip()
     teclado = [["Jesus Guillermo Pascual chalan"], ["Ingresar otro nombre"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text("👷 Ingeniero a cargo:", reply_markup=reply_markup)
     return INGENIERO
 
 async def get_ingeniero(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text
+    txt = update.message.text.strip()
     if txt == "Ingresar otro nombre":
         await update.message.reply_text("Escriba el nombre del ingeniero:", reply_markup=ReplyKeyboardRemove())
         return INGENIERO
-    context.user_data["ingeniero"] = txt
+    context.user_data["ingeniero"] = txt.upper()
     
     teclado = [["🖊️ Firma Automática (Jesús Pascual)"], ["📷 Subir Foto de Firma"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
@@ -339,9 +339,9 @@ async def get_foto_firma(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return FECHA
 
 async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text
+    txt = update.message.text.strip()
     if txt == "Ingresar otra fecha":
-        await update.message.reply_text("Escriba la fecha (ej: 24/09/2026):", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text("Escriba la fecha (ej: 28/09/2026):", reply_markup=ReplyKeyboardRemove())
         return FECHA
     context.user_data["fecha"] = txt
     
@@ -362,15 +362,14 @@ async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CUSTOMER_NAME
 
 async def get_customer_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text
+    txt = update.message.text.strip()
     if txt == "Sí, mismo que Contacto":
         context.user_data["customer_name"] = context.user_data.get("contacto", "")
     elif txt == "Dejar vacío":
         context.user_data["customer_name"] = ""
     else:
-        context.user_data["customer_name"] = txt
+        context.user_data["customer_name"] = txt.upper()
 
-    # Preguntar por la firma del cliente
     teclado = [["Dejar vacío"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text(
@@ -394,15 +393,26 @@ async def get_firma_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💵 Moneda y cobro:", reply_markup=reply_markup)
     return MONEDA
 
-def escribir_con_espacio(celda, texto, negrita=False):
+def escribir_con_espacio(celda, texto, negrita=False, tamano=8):
     celda.text = ""
-    p = celda.paragraphs[0]
-    p.paragraph_format.space_before = Pt(1)
-    p.paragraph_format.space_after = Pt(1)
-    run = p.add_run(f"  {texto}")
-    run.font.size = Pt(8)
-    if negrita:
-        run.bold = True
+    lineas = [l.strip() for l in texto.split("\n") if l.strip()]
+    
+    if not lineas:
+        p = celda.paragraphs[0]
+        p.paragraph_format.space_before = Pt(1)
+        p.paragraph_format.space_after = Pt(1)
+        p.paragraph_format.line_spacing = 1.05
+        return
+
+    for idx, linea in enumerate(lineas):
+        p = celda.paragraphs[0] if idx == 0 else celda.add_paragraph()
+        p.paragraph_format.space_before = Pt(1)
+        p.paragraph_format.space_after = Pt(1)
+        p.paragraph_format.line_spacing = 1.05
+        run = p.add_run(f"  {linea}")
+        run.font.size = Pt(tamano)
+        if negrita:
+            run.bold = True
 
 def eliminar_linea_vertical(celda_izq, celda_der):
     tcPr_i = celda_izq._tc.get_or_add_tcPr()
@@ -414,8 +424,8 @@ def eliminar_linea_vertical(celda_izq, celda_der):
 
 async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        txt = update.message.text
-        context.user_data["moneda"] = "" if txt == "Dejar vacío" else txt
+        txt = update.message.text.strip()
+        context.user_data["moneda"] = "" if txt == "Dejar vacío" else txt.upper()
         
         plantilla = "1-TECHNICAL SERVICE REPORT corregido.docx"
         if not os.path.exists(plantilla):
@@ -447,7 +457,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rep_o = context.user_data.get("rep_obs", "")
         satisfaccion = context.user_data.get("satisfaccion", "")
         checklist_sel = context.user_data.get("checklist_seleccionados", [])
-        ingeniero = context.user_data.get("ingeniero", "Jesus Guillermo Pascual chalan")
+        ingeniero = context.user_data.get("ingeniero", "JESUS GUILLERMO PASCUAL CHALAN")
         fecha_reporte = context.user_data.get("fecha", datetime.now().strftime("%d/%m/%Y"))
 
         t = doc.tables[0]
@@ -487,10 +497,12 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 p_det.paragraph_format.space_before = Pt(0)
                 p_det.paragraph_format.space_after = Pt(0)
                 p_det.add_run("Detalles\n(Feedback Details)").font.size = Pt(8.5)
-                escribir_con_espacio(r.cells[-1], detalles)
+                escribir_con_espacio(r.cells[-1], detalles, tamano=7.5)
                 
+            # Motivo del Fallo y Solución protegido
             if any("motivo del fallo" in x or "fault reason" in x for x in txt_fila):
-                escribir_con_espacio(r.cells[-1], solucion)
+                tam_sol = 7.0 if len(solucion) > 250 else 7.5
+                escribir_con_espacio(r.cells[-1], solucion, tamano=tam_sol)
 
         # 2. Tipo de Servicio
         col1 = [
@@ -584,7 +596,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 run.bold = True
                             break
 
-        # 4. Lista de Verificación
+        # 4. Lista de Verificación (Protegida)
         checklist_map = [
             ("Apariencia (Appearance check)", ["aparienc", "appearance"]),
             ("Bateria de respaldo (Backup battery)", ["bateri", "battery"]),
@@ -606,7 +618,10 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         for r in t.rows:
             txt_r = " ".join([c.text.lower() for c in r.cells])
-            if any(w in txt_r for w in ["apariencia", "pantalla", "opciones", "conductiv", "bomba", "calibración", "sensor"]):
+            if "motivo del fallo" in txt_r or "fault reason" in txt_r:
+                continue
+
+            if any(w in txt_r for w in ["apariencia", "pantalla", "opciones", "conductiv", "bomba", "calibración", "sensor", "verificación"]):
                 for c in r.cells:
                     txt_c = " ".join(c.text.lower().split())
                     for item_full, patrones in checklist_map:
@@ -624,7 +639,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 run.bold = True
                             break
 
-        # 5. Registro de Componentes (Desplazamiento a la columna exacta de cada campo)
+        # 5. Registro de Componentes
         if rep_p or rep_c or rep_o:
             idx_head = None
             for i_r, r_obj in enumerate(t.rows):
@@ -697,7 +712,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 escribir_con_espacio(r.cells[1], fecha_reporte)
                 escribir_con_espacio(r.cells[3], fecha_reporte)
 
-        # Firma del Cliente (si se subió foto)
+        # Firma del Cliente (foto)
         if firma_cliente_archivo and os.path.exists(firma_cliente_archivo):
             for r in t_firmas.rows:
                 if any("customer signature" in c.text.lower() or "firma" in c.text.lower() for c in r.cells):
@@ -739,7 +754,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_document(
                 chat_id=update.effective_chat.id,
                 document=f,
-                caption="Documento listo"
+                caption="📄 Reporte Técnico en Word listo"
             )
 
     except Exception as e:
