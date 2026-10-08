@@ -44,6 +44,18 @@ def iniciar_servidor_web():
     servidor = HTTPServer(("0.0.0.0", puerto), HealthHandler)
     servidor.serve_forever()
 
+# Opciones de Tipo de Servicio
+OPCIONES_TIPO_SERVICIO = [
+    ("Mantenimiento Correctivo (Repair)", "correctivo"),
+    ("Mantenimiento Preventivo (PM)", "preventivo"),
+    ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
+    ("Entrenamiento (Operation training)", "entrenamiento"),
+    ("Instalación (Installation)", "instal"),
+    ("Seguimiento Tratamiento (Follow-up Trearment)", "seguimiento"),
+    ("Desinstalación (Uninstallation)", "desinstal"),
+    ("Otro (Other)", "otro")
+]
+
 ITEMS_CHECKLIST = [
     "Apariencia (Appearance check)",
     "Bateria de respaldo (Backup battery)",
@@ -73,7 +85,7 @@ ITEMS_CHECKLIST = [
     SERIE,
     HOROMETRO,
     VERSION_SW,
-    TIPO_SERVICIO,
+    TIPO_SERVICIO_MENU,
     DETALLES,
     FALLA_TIPO,
     SOLUCION,
@@ -97,6 +109,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def iniciar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     context.user_data["checklist_seleccionados"] = []
+    context.user_data["tipos_servicio_seleccionados"] = []
     teclado = [["Dejar vacío"]]
     reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text("📄 Ingrese Consecutivo (ej: 0000008) o pulse Dejar vacío:", reply_markup=reply_markup)
@@ -150,27 +163,50 @@ async def get_horometro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💻 Ingrese Versión de Software:", reply_markup=reply_markup)
     return VERSION_SW
 
+def armar_teclado_tipo_servicio(seleccionados):
+    botones = []
+    for nombre_largo, clave in OPCIONES_TIPO_SERVICIO:
+        nombre_corto = nombre_largo.split("(")[0].strip()
+        marca = "✔ " if clave in seleccionados else "⬜ "
+        botones.append([InlineKeyboardButton(f"{marca}{nombre_corto}", callback_data=f"srv_{clave}")])
+    botones.append([InlineKeyboardButton("✅ LISTO / CONTINUAR", callback_data="srv_DONE")])
+    return InlineKeyboardMarkup(botones)
+
 async def get_version_sw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text.strip()
     context.user_data["version_sw"] = "" if txt == "Dejar vacío" else txt.upper()
-    teclado = [
-        ["Mantenimiento Correctivo (Repair)"],
-        ["Mantenimiento Preventivo (PM)"],
-        ["Instalación (Installation)"],
-        ["Diagnostico (Diagnostic / Inspection)"],
-        ["Entrenamiento (Operation training)"],
-        ["Seguimiento Tratamiento (Follow-up Trearment)"],
-        ["Desinstalación (Uninstallation)"],
-        ["Otro (Other)"]
-    ]
-    reply_markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("🛠️ Seleccione Tipo de Servicio:", reply_markup=reply_markup)
-    return TIPO_SERVICIO
+    
+    markup = armar_teclado_tipo_servicio(context.user_data["tipos_servicio_seleccionados"])
+    await update.message.reply_text(
+        "🛠️ Tipo de Servicio (Service Type):\nSeleccione uno o varios y presione 'LISTO / CONTINUAR':",
+        reply_markup=markup
+    )
+    return TIPO_SERVICIO_MENU
 
-async def get_tipo_servicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["tipo_servicio"] = update.message.text.strip()
-    await update.message.reply_text("📝 Ingrese Detalles / Feedback Details:", reply_markup=ReplyKeyboardRemove())
-    return DETALLES
+async def tipo_servicio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    sel = context.user_data.get("tipos_servicio_seleccionados", [])
+    
+    if data == "srv_DONE":
+        if not sel:
+            # Si no seleccionó ninguno, se le avisa o continúa vacío
+            await query.message.reply_text("⚠️ No seleccionó ningún tipo de servicio (quedará en blanco).")
+        else:
+            await query.message.reply_text(f"✅ Se seleccionaron {len(sel)} tipo(s) de servicio.")
+        await query.message.reply_text("📝 Ingrese Detalles / Feedback Details:", reply_markup=ReplyKeyboardRemove())
+        return DETALLES
+        
+    clave = data.replace("srv_", "")
+    if clave in sel:
+        sel.remove(clave)
+    else:
+        sel.append(clave)
+    context.user_data["tipos_servicio_seleccionados"] = sel
+
+    await query.edit_message_reply_markup(reply_markup=armar_teclado_tipo_servicio(context.user_data["tipos_servicio_seleccionados"]))
+    return TIPO_SERVICIO_MENU
 
 async def get_detalles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["detalles"] = update.message.text.strip().upper()
@@ -450,7 +486,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         version_sw = context.user_data.get("version_sw", "")
         detalles = context.user_data.get("detalles", "")
         solucion = context.user_data.get("solucion", "")
-        tipo_serv = context.user_data.get("tipo_servicio", "")
+        tipos_serv_sel = context.user_data.get("tipos_servicio_seleccionados", [])
         falla_tipo = context.user_data.get("falla_tipo", "")
         rep_p = context.user_data.get("rep_parte", "")
         rep_c = context.user_data.get("rep_cant", "")
@@ -504,7 +540,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 tam_sol = 7.0 if len(solucion) > 250 else 7.5
                 escribir_con_espacio(r.cells[-1], solucion, tamano=tam_sol)
 
-        # 2. Tipo de Servicio
+        # 2. Tipo de Servicio (Soporta selección de uno o varios)
         col1 = [
             ("Mantenimiento Correctivo (Repair)", "correctivo"),
             ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
@@ -538,7 +574,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     p.paragraph_format.space_before = Pt(0)
                     p.paragraph_format.space_after = Pt(0)
                     p.paragraph_format.line_spacing = 1.0
-                    sel = clave in tipo_serv.lower()
+                    sel = clave in tipos_serv_sel
                     marca = "[ X ]" if sel else "[   ]"
                     run = p.add_run(f"  {op}  {marca}")
                     run.font.size = Pt(7.5)
@@ -556,7 +592,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     p.paragraph_format.space_before = Pt(0)
                     p.paragraph_format.space_after = Pt(0)
                     p.paragraph_format.line_spacing = 1.0
-                    sel = clave in tipo_serv.lower()
+                    sel = clave in tipos_serv_sel
                     marca = "[ X ]" if sel else "[   ]"
                     run = p.add_run(f"  {op}  {marca}")
                     run.font.size = Pt(7.5)
@@ -698,127 +734,5 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             txt_row = " ".join([c.text.lower() for c in r.cells])
             if "monto de dinero" in txt_row or "amount of money" in txt_row:
                 if len(r.cells) >= 2:
-                    eliminar_linea_vertical(r.cells[0], r.cells[-1])
-                break
-
-        # 8. Firmas
-        t_firmas = doc.tables[1] if len(doc.tables) > 1 else t
-        for r in t_firmas.rows:
-            txt_r = [c.text.lower() for c in r.cells]
-            if any("customer name" in x for x in txt_r) or any("nombre del cliente" in x for x in txt_r):
-                escribir_con_espacio(r.cells[1], customer_name)
-                escribir_con_espacio(r.cells[3], ingeniero)
-            if any("signature date" in x for x in txt_r) or any("fecha de firma" in x for x in txt_r):
-                escribir_con_espacio(r.cells[1], fecha_reporte)
-                escribir_con_espacio(r.cells[3], fecha_reporte)
-
-        # Firma del Cliente (foto)
-        if firma_cliente_archivo and os.path.exists(firma_cliente_archivo):
-            for r in t_firmas.rows:
-                if any("customer signature" in c.text.lower() or "firma" in c.text.lower() for c in r.cells):
-                    cell_sig_cli = r.cells[1]
-                    cell_sig_cli.text = ""
-                    cell_sig_cli.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                    p_cli = cell_sig_cli.paragraphs[0]
-                    p_cli.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    p_cli.paragraph_format.space_before = Pt(0)
-                    p_cli.paragraph_format.space_after = Pt(0)
-                    p_cli.add_run().add_picture(firma_cliente_archivo, width=Inches(1.1))
-                    break
-
-        # Firma del Ingeniero
-        archivo_firma = context.user_data.get("firma_custom")
-        if not archivo_firma:
-            for f_nom in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
-                if os.path.exists(f_nom):
-                    archivo_firma = f_nom
-                    break
-
-        if archivo_firma and os.path.exists(archivo_firma):
-            for r in t_firmas.rows:
-                if any("engineer signature" in c.text.lower() or "firma" in c.text.lower() for c in r.cells):
-                    cell_sig = r.cells[3]
-                    cell_sig.text = ""
-                    cell_sig.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                    p = cell_sig.paragraphs[0]
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    p.paragraph_format.space_before = Pt(0)
-                    p.paragraph_format.space_after = Pt(0)
-                    p.add_run().add_picture(archivo_firma, width=Inches(1.1))
-                    break
-
-        nombre_docx = f"Reporte_{serie if serie else 'Servicio'}_{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
-        doc.save(nombre_docx)
-
-        with open(nombre_docx, "rb") as f:
-            await context.bot.send_document(
-                chat_id=update.effective_chat.id,
-                document=f,
-                caption="📄 Reporte Técnico en Word listo"
-            )
-
-    except Exception as e:
-        logger.error(f"Error generando documento: {e}")
-        await update.message.reply_text(f"⚠️ Error generando el archivo: {e}")
-
-    return ConversationHandler.END
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    await update.message.reply_text("❌ Cancelado.", reply_markup=ReplyKeyboardRemove())
-    return ConversationHandler.END
-
-def main():
-    t = threading.Thread(target=iniciar_servidor_web, daemon=True)
-    t.start()
-
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    if not token:
-        logger.error("TELEGRAM_BOT_TOKEN no configurado")
-        sys.exit(1)
-
-    app = ApplicationBuilder().token(token).build()
-
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("reporte", iniciar_reporte)],
-        states={
-            CONSECUTIVO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_consecutivo)],
-            HOSPITAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_hospital)],
-            CONTACTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_contacto)],
-            TELEFONO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_telefono)],
-            DIRECCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_direccion)],
-            MODELO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_modelo)],
-            SERIE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_serie)],
-            HOROMETRO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_horometro)],
-            VERSION_SW: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_version_sw)],
-            TIPO_SERVICIO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_tipo_servicio)],
-            DETALLES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_detalles)],
-            FALLA_TIPO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_falla_tipo)],
-            SOLUCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_solucion)],
-            CHECKLIST_MENU: [CallbackQueryHandler(checklist_callback)],
-            REP_PARTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_rep_parte)],
-            REP_CANT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_rep_cant)],
-            REP_OBS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_rep_obs)],
-            SATISFACCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_satisfaccion)],
-            INGENIERO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_ingeniero)],
-            OPCION_FIRMA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_opcion_firma)],
-            SUBIR_FIRMA: [MessageHandler(filters.PHOTO, get_foto_firma)],
-            FECHA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fecha)],
-            CUSTOMER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_customer_name)],
-            FIRMA_CLIENTE: [
-                MessageHandler(filters.PHOTO, get_firma_cliente),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_firma_cliente)
-            ],
-            MONEDA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_moneda)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(conv)
-
-    logger.info("Bot de Reportes listo.")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+                    eliminar_linea_vertical(r.cells
+2
