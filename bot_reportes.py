@@ -44,7 +44,6 @@ def iniciar_servidor_web():
     servidor = HTTPServer(("0.0.0.0", puerto), HealthHandler)
     servidor.serve_forever()
 
-# Opciones de Tipo de Servicio
 OPCIONES_TIPO_SERVICIO = [
     ("Mantenimiento Correctivo (Repair)", "correctivo"),
     ("Mantenimiento Preventivo (PM)", "preventivo"),
@@ -191,7 +190,6 @@ async def tipo_servicio_callback(update: Update, context: ContextTypes.DEFAULT_T
     
     if data == "srv_DONE":
         if not sel:
-            # Si no seleccionó ninguno, se le avisa o continúa vacío
             await query.message.reply_text("⚠️ No seleccionó ningún tipo de servicio (quedará en blanco).")
         else:
             await query.message.reply_text(f"✅ Se seleccionaron {len(sel)} tipo(s) de servicio.")
@@ -540,7 +538,7 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 tam_sol = 7.0 if len(solucion) > 250 else 7.5
                 escribir_con_espacio(r.cells[-1], solucion, tamano=tam_sol)
 
-        # 2. Tipo de Servicio (Soporta selección de uno o varios)
+        # 2. Tipo de Servicio
         col1 = [
             ("Mantenimiento Correctivo (Repair)", "correctivo"),
             ("Diagnostico (Diagnostic / Inspection)", "diagnostico"),
@@ -624,115 +622,4 @@ async def get_moneda(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             c.text = ""
                             p = c.paragraphs[0]
                             p.paragraph_format.space_before = Pt(0)
-                            p.paragraph_format.space_after = Pt(0)
-                            p.paragraph_format.line_spacing = 1.0
-                            run = p.add_run(f"  {nombre}  {marca}")
-                            run.font.size = Pt(7.5)
-                            if es_sel:
-                                run.bold = True
-                            break
-
-        # 4. Lista de Verificación (Protegida)
-        checklist_map = [
-            ("Apariencia (Appearance check)", ["aparienc", "appearance"]),
-            ("Bateria de respaldo (Backup battery)", ["bateri", "battery"]),
-            ("Placa Hall o Tarjeta electronica", ["placa", "hall", "pcb"]),
-            ("Señal de sensor (Sensor signal)", ["señal", "signal"]),
-            ("Pantalla táctil (Touch screen)", ["pantalla", "touch"]),
-            ("Pieza hidráulica (Hydraulic parts)", ["pieza hidráulica", "hydraulic parts", "pieza"]),
-            ("Parametros de Tratamiento", ["parametr", "treatment parameters"]),
-            ("Sim. de Tratamiento (Simulation treatme)", ["sim.", "simulation"]),
-            ("Opciones (Options)", ["opcion", "options"]),
-            ("Sensor de Cond. (Conductivity sensor)", ["sensor de cond", "conductivity sensor"]),
-            ("Bomba Ceramica (Ceramic pump)", ["bomba ceramica", "ceramic pump"]),
-            ("Bomba de Heparina (Syringe pump)", ["bomba de heparina", "syringe pump", "heparina"]),
-            ("Calibración de Conductividad (Cond. Calibration)", ["conductiv", "cond. calib"]),
-            ("Calibración de Temperatura (Temp. calibration)", ["temperat", "temp.calib"]),
-            ("Calibración de Presión (Pressure calibration)", ["presión", "presion", "pressure"]),
-            ("Otros (Other)", ["otros", "other"])
-        ]
-
-        for r in t.rows:
-            txt_r = " ".join([c.text.lower() for c in r.cells])
-            if "motivo del fallo" in txt_r or "fault reason" in txt_r:
-                continue
-
-            if any(w in txt_r for w in ["apariencia", "pantalla", "opciones", "conductiv", "bomba", "calibración", "sensor", "verificación"]):
-                for c in r.cells:
-                    txt_c = " ".join(c.text.lower().split())
-                    for item_full, patrones in checklist_map:
-                        if any(p in txt_c for p in patrones):
-                            es_chk = item_full in checklist_sel
-                            marca = "[ ✔ ]" if es_chk else "[   ]"
-                            c.text = ""
-                            p = c.paragraphs[0]
-                            p.paragraph_format.space_before = Pt(0)
-                            p.paragraph_format.space_after = Pt(0)
-                            p.paragraph_format.line_spacing = 1.0
-                            run = p.add_run(f"  {item_full}  {marca}")
-                            run.font.size = Pt(7.5)
-                            if es_chk:
-                                run.bold = True
-                            break
-
-        # 5. Registro de Componentes
-        if rep_p or rep_c or rep_o:
-            idx_head = None
-            for i_r, r_obj in enumerate(t.rows):
-                txt_row = " ".join([c.text.lower() for c in r_obj.cells])
-                if "component name" in txt_row or "nombre de la parte" in txt_row:
-                    idx_head = i_r
-                    break
-
-            if idx_head is not None and idx_head + 1 < len(t.rows):
-                fila_datos = t.rows[idx_head + 1]
-                
-                if len(fila_datos.cells) >= 4:
-                    c_nombre = fila_datos.cells[2]
-                    c_cant = fila_datos.cells[3] if len(fila_datos.cells) > 3 else None
-                    c_obs = fila_datos.cells[-1] if len(fila_datos.cells) > 4 else None
-                else:
-                    c_nombre = fila_datos.cells[1]
-                    c_cant = fila_datos.cells[2] if len(fila_datos.cells) > 2 else None
-                    c_obs = None
-
-                if rep_p and c_nombre:
-                    escribir_con_espacio(c_nombre, rep_p)
-                if rep_c and c_cant:
-                    escribir_con_espacio(c_cant, rep_c)
-                if rep_o and c_obs:
-                    escribir_con_espacio(c_obs, rep_o)
-
-        # 6. Encuesta de Satisfacción
-        opciones_sat = [
-            "Satisfecho (Satisfield)",
-            "Relativamente satisfecho",
-            "Normal (Normal)",
-            "Insatisfecho (Dissatisfield)",
-            "Muy Insatisfecho (Very Dissatisfield)"
-        ]
-        for r in t.rows:
-            if any("satisfaction" in c.text.lower() or "satisfacción" in c.text.lower() for c in r.cells):
-                c_sat = r.cells[-1]
-                c_sat.text = ""
-                p = c_sat.paragraphs[0]
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                p.paragraph_format.space_before = Pt(1)
-                p.paragraph_format.space_after = Pt(1)
-                p.paragraph_format.line_spacing = 1.0
-                p.add_run("Encuesta de satisfacción (Are you satisfield with the service):\n").font.size = Pt(8)
-                for sat_op in opciones_sat:
-                    marca = "[ ✔ ]" if (satisfaccion and sat_op.split()[0].lower() in satisfaccion.lower()) else "[   ]"
-                    run = p.add_run(f"{sat_op} {marca}    ")
-                    run.font.size = Pt(8)
-                    if marca == "[ ✔ ]":
-                        run.bold = True
-                break
-
-        # 7. Monto de dinero y Moneda (Quitar línea divisoria)
-        for r in t.rows:
-            txt_row = " ".join([c.text.lower() for c in r.cells])
-            if "monto de dinero" in txt_row or "amount of money" in txt_row:
-                if len(r.cells) >= 2:
-                    eliminar_linea_vertical(r.cells
-2
+                            p.paragraph_format.space_after = Pt(
