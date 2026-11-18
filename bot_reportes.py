@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import zipfile
 import logging
 import threading
@@ -39,7 +40,7 @@ def iniciar_servidor_web():
     HTTPServer(("0.0.0.0", puerto), HealthHandler).serve_forever()
 
 # ==============================================================================
-# BASE DE DATOS DE CLÍNICAS (12 Clínicas extraídas de tu CRM - Sin Innova)
+# BASE DE DATOS DE CLÍNICAS (12 Clínicas de tu CRM)
 # ==============================================================================
 CLINICAS_BASE = {
     "CLINICA DEL RIÑON SAN CAMILLE SAC": {
@@ -132,17 +133,78 @@ ITEMS_CHECKLIST = [
     "Calibración de Presión (Pressure calibration)", "Otros (Other)"
 ]
 
+# Persistencia local de ingenieros y PINs
+ARCHIVO_INGENIEROS = "ingenieros_db.json"
+
+def buscar_firma_default():
+    for f_nom in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
+        if os.path.exists(f_nom):
+            return f_nom
+    return ""
+
+def cargar_ingenieros():
+    base = {
+        "JESUS GUILLERMO PASCUAL CHALAN": {
+            "pin": os.environ.get("PIN_JESUS", ""),
+            "firma": buscar_firma_default()
+        }
+    }
+    if os.path.exists(ARCHIVO_INGENIEROS):
+        try:
+            with open(ARCHIVO_INGENIEROS, "r", encoding="utf-8") as f:
+                guardados = json.load(f)
+                base.update(guardados)
+        except Exception as e:
+            logger.error(f"Error cargando ingenieros: {e}")
+    return base
+
+def guardar_ingenieros(db):
+    try:
+        with open(ARCHIVO_INGENIEROS, "w", encoding="utf-8") as f:
+            json.dump(db, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error guardando ingenieros: {e}")
+
 (
     SELECCION_CLINICA, HOSPITAL, CONTACTO, TELEFONO, DIRECCION,
     MODELO, TIPO_SERVICIO_MENU, PM_TIPO, PM_MODO_LOTE, SERIES_LOTE,
     SERIE, HOROMETRO, VERSION_SW, DETALLES, FALLA_TIPO, SOLUCION,
     CHECKLIST_MENU, REP_PARTE, REP_CANT, REP_OBS, SATISFACCION,
-    CONFIRMAR_INGENIERO, SUBIR_FIRMA, FECHA,
-    CUSTOMER_NAME, FIRMA_CLIENTE
-) = range(26)
+    SELECCION_INGENIERO, VALIDAR_PIN_ING, REGISTRAR_PIN_JESUS,
+    REG_ING_NOMBRE, REG_ING_FIRMA, REG_ING_PIN,
+    FECHA, CUSTOMER_NAME, FIRMA_CLIENTE,
+    CMD_PIN_NUEVO
+) = range(31)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Usa /reporte para generar un reporte técnico rápido.")
+    await update.message.reply_text(
+        "👋 Comandos disponibles:\n"
+        "• /reporte - Generar reporte técnico (individual o lote ZIP)\n"
+        "• /pin - Registrar o cambiar el PIN de Jesús Pascual\n"
+        "• /cancel - Cancelar operación actual"
+    )
+
+# Comando independiente /pin para que Jesús registre o cambie su PIN cuando quiera
+async def iniciar_config_pin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🔐 Ingrese el nuevo PIN numérico (ej. 1234) para firmar como JESÚS PASCUAL:",
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return CMD_PIN_NUEVO
+
+async def guardar_pin_jesus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    pin = update.message.text.strip()
+    if len(pin) < 4:
+        await update.message.reply_text("⚠️ El PIN debe tener al menos 4 dígitos. Escríbalo nuevamente:")
+        return CMD_PIN_NUEVO
+    db = cargar_ingenieros()
+    db["JESUS GUILLERMO PASCUAL CHALAN"] = {
+        "pin": pin,
+        "firma": buscar_firma_default()
+    }
+    guardar_ingenieros(db)
+    await update.message.reply_text("✅ PIN de JESÚS PASCUAL registrado correctamente. Ya puedes usar /reporte.")
+    return ConversationHandler.END
 
 async def iniciar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clinicas_mem = context.bot_data.setdefault("clinicas", dict(CLINICAS_BASE))
@@ -150,7 +212,6 @@ async def iniciar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["checklist_seleccionados"] = []
     context.user_data["tipos_servicio_seleccionados"] = []
     context.user_data["series_lote"] = []
-    context.user_data["consecutivo"] = ""
 
     botones = [[nombre] for nombre in clinicas_mem.keys()]
     botones.append(["➕ Nuevo"])
@@ -239,6 +300,7 @@ async def tipo_servicio_callback(update: Update, context: ContextTypes.DEFAULT_T
             await query.message.reply_text("⚙️ Seleccione el Mantenimiento Preventivo:", reply_markup=markup)
             return PM_TIPO
             
+        context.user_data["pm_auto"] = False
         await query.message.reply_text("🔢 Ingrese Serial No.:", reply_markup=ReplyKeyboardRemove())
         return SERIE
 
@@ -260,7 +322,6 @@ async def get_pm_tipo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["solucion"] = texto_pm
         context.user_data["falla_tipo"] = "Ninguno / Normal"
         context.user_data["checklist_seleccionados"] = list(ITEMS_CHECKLIST)
-        context.user_data["version_sw"] = "020305"
         
         markup = ReplyKeyboardMarkup([["📄 1 solo equipo"], ["📦 Varios equipos (Lote ZIP)"]], one_time_keyboard=True, resize_keyboard=True)
         await update.message.reply_text(
@@ -285,6 +346,14 @@ async def get_pm_modo_lote(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔢 Ingrese Serial No.:", reply_markup=ReplyKeyboardRemove())
     return SERIE
 
+def pedir_version_sw_markup():
+    teclado = [
+        ["020304", "020305"],
+        ["020218", "020219"],
+        ["Dejar vacío"]
+    ]
+    return ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
+
 async def get_series_lote(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw = update.message.text.strip().upper()
     reemplazado = raw.replace(",", "\n").replace(";", "\n")
@@ -296,33 +365,31 @@ async def get_series_lote(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["series_lote"] = lista_series
     await update.message.reply_text(f"✅ {len(lista_series)} equipos listos para ZIP.")
-    
-    markup = ReplyKeyboardMarkup([["Sin repuestos / Continuar"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("⚙️ ¿Se usó algún repuesto? (Escriba el nombre o pulse Continuar):", reply_markup=markup)
-    return REP_PARTE
+    await update.message.reply_text("💻 Seleccione Versión de Software para el lote:", reply_markup=pedir_version_sw_markup())
+    return VERSION_SW
 
 async def get_serie(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["serie"] = update.message.text.strip().upper()
     markup = ReplyKeyboardMarkup([["Dejar vacío"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("⏱️ Horómetro:", reply_markup=markup)
+    await update.message.reply_text("⏱️ Ingrese Horómetro o pulse 'Dejar vacío':", reply_markup=markup)
     return HOROMETRO
 
 async def get_horometro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text.strip()
     context.user_data["horometro"] = "" if txt == "Dejar vacío" else txt.upper()
-    
-    if context.user_data.get("pm_auto"):
-        markup = ReplyKeyboardMarkup([["Sin repuestos / Continuar"]], one_time_keyboard=True, resize_keyboard=True)
-        await update.message.reply_text("⚙️ ¿Se usó algún repuesto? (Escriba el nombre o pulse Continuar):", reply_markup=markup)
-        return REP_PARTE
-
-    markup = ReplyKeyboardMarkup([["020305"], ["Dejar vacío"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("💻 Versión de Software:", reply_markup=markup)
+    await update.message.reply_text("💻 Seleccione Versión de Software:", reply_markup=pedir_version_sw_markup())
     return VERSION_SW
 
 async def get_version_sw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text.strip()
     context.user_data["version_sw"] = "" if txt == "Dejar vacío" else txt.upper()
+    
+    # Si es preventivo automático, salta directo a repuestos (porque detalles/solución/checklist ya están llenos)
+    if context.user_data.get("pm_auto"):
+        markup = ReplyKeyboardMarkup([["Sin repuestos / Continuar"]], one_time_keyboard=True, resize_keyboard=True)
+        await update.message.reply_text("⚙️ ¿Se usó algún repuesto? (Escriba el nombre o pulse Continuar):", reply_markup=markup)
+        return REP_PARTE
+
     await update.message.reply_text("📝 Detalles (Feedback Details):", reply_markup=ReplyKeyboardRemove())
     return DETALLES
 
@@ -416,34 +483,128 @@ async def get_rep_obs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["rep_obs"] = "" if txt == "Dejar vacío" else txt.upper()
     return await ir_satisfaccion(update)
 
+# ==============================================================================
+# SELECCIÓN, REGISTRO Y VALIDACIÓN DE INGENIERO CON PIN
+# ==============================================================================
 async def get_satisfaccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["satisfaccion"] = update.message.text.strip()
-    markup = ReplyKeyboardMarkup([["✅ Jesús Pascual + Firma Automática"], ["📷 Subir otra firma"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("👷 Firma del Ingeniero:", reply_markup=markup)
-    return CONFIRMAR_INGENIERO
+    db_ing = cargar_ingenieros()
+    botones = [[nombre] for nombre in db_ing.keys()]
+    botones.append(["➕ Registrar otro ingeniero"])
+    markup = ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
+    await update.message.reply_text("👷 Seleccione el Ingeniero a cargo o registre uno nuevo:", reply_markup=markup)
+    return SELECCION_INGENIERO
 
-async def get_confirmar_ingeniero(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def get_seleccion_ingeniero(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text.strip()
+    if txt == "➕ Registrar otro ingeniero":
+        await update.message.reply_text("👤 Escriba el Nombre Completo del nuevo ingeniero:", reply_markup=ReplyKeyboardRemove())
+        return REG_ING_NOMBRE
+
+    db_ing = cargar_ingenieros()
+    if txt in db_ing:
+        context.user_data["ing_seleccionado"] = txt
+        datos_ing = db_ing[txt]
+        
+        # Si es Jesús y aún no tiene PIN configurado, pedir que lo cree ahora
+        if txt == "JESUS GUILLERMO PASCUAL CHALAN" and not datos_ing.get("pin"):
+            await update.message.reply_text(
+                "🔐 Aún no has registrado tu PIN personal de Jesús.\n"
+                "Escríbelo ahora (mínimo 4 dígitos) para guardarlo y firmar:",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return REGISTRAR_PIN_JESUS
+
+        await update.message.reply_text(
+            f"🔐 Ingrese el PIN de seguridad de {txt} para autorizar su firma:",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return VALIDAR_PIN_ING
+
+    await update.message.reply_text("⚠️ Seleccione un ingeniero válido de los botones.")
+    return SELECCION_INGENIERO
+
+async def get_registrar_pin_jesus(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    pin = update.message.text.strip()
+    if len(pin) < 4:
+        await update.message.reply_text("⚠️ El PIN debe tener al menos 4 dígitos. Intente de nuevo:")
+        return REGISTRAR_PIN_JESUS
+
+    db_ing = cargar_ingenieros()
+    firma_j = buscar_firma_default()
+    db_ing["JESUS GUILLERMO PASCUAL CHALAN"] = {"pin": pin, "firma": firma_j}
+    guardar_ingenieros(db_ing)
+
     context.user_data["ingeniero"] = "JESUS GUILLERMO PASCUAL CHALAN"
-    if "Subir otra" in txt:
-        await update.message.reply_text("📸 Envíe la FOTO de la firma:", reply_markup=ReplyKeyboardRemove())
-        return SUBIR_FIRMA
-    context.user_data["firma_custom"] = None
+    context.user_data["firma_custom"] = firma_j
+
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
     markup = ReplyKeyboardMarkup([[fecha_hoy], ["Ingresar otra fecha"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("📅 Fecha del reporte:", reply_markup=markup)
+    await update.message.reply_text("✅ PIN registrado y firma estampada.\n📅 Confirme la fecha del reporte:", reply_markup=markup)
     return FECHA
 
-async def get_foto_firma(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def get_validar_pin_ing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    pin_ingresado = update.message.text.strip()
+    ing_nombre = context.user_data.get("ing_seleccionado", "")
+    db_ing = cargar_ingenieros()
+    datos_ing = db_ing.get(ing_nombre, {})
+
+    if pin_ingresado != datos_ing.get("pin"):
+        await update.message.reply_text("❌ PIN incorrecto. Intente nuevamente o envíe /cancel:")
+        return VALIDAR_PIN_ING
+
+    context.user_data["ingeniero"] = ing_nombre
+    context.user_data["firma_custom"] = datos_ing.get("firma") or buscar_firma_default()
+
+    fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+    markup = ReplyKeyboardMarkup([[fecha_hoy], ["Ingresar otra fecha"]], one_time_keyboard=True, resize_keyboard=True)
+    await update.message.reply_text(f"✅ PIN correcto ({ing_nombre}).\n📅 Confirme la fecha del reporte:", reply_markup=markup)
+    return FECHA
+
+# Flujo para registrar otro ingeniero nuevo
+async def get_reg_ing_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    nombre = update.message.text.strip().upper()
+    if not nombre:
+        await update.message.reply_text("⚠️ Escriba un nombre válido:")
+        return REG_ING_NOMBRE
+    context.user_data["nuevo_ing_nombre"] = nombre
+    await update.message.reply_text(f"📸 Envíe la FOTO de la firma de {nombre}:")
+    return REG_ING_FIRMA
+
+async def get_reg_ing_firma(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    nombre = context.user_data["nuevo_ing_nombre"]
     foto = await update.message.photo[-1].get_file()
-    ruta_temp = "firma_subida.png"
-    await foto.download_to_drive(ruta_temp)
-    context.user_data["firma_custom"] = ruta_temp
+    nombre_limpio = "".join(c for c in nombre if c.isalnum())[:20]
+    ruta_firma = f"firma_{nombre_limpio}.png"
+    await foto.download_to_drive(ruta_firma)
+    context.user_data["nuevo_ing_firma"] = ruta_firma
+    await update.message.reply_text(f"🔐 Cree un PIN numérico (ej. 1234) para que {nombre} firme sus reportes:")
+    return REG_ING_PIN
+
+async def get_reg_ing_pin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    pin = update.message.text.strip()
+    if len(pin) < 4:
+        await update.message.reply_text("⚠️ El PIN debe tener al menos 4 dígitos. Escríbalo de nuevo:")
+        return REG_ING_PIN
+
+    nombre = context.user_data["nuevo_ing_nombre"]
+    ruta_firma = context.user_data["nuevo_ing_firma"]
+
+    db_ing = cargar_ingenieros()
+    db_ing[nombre] = {"pin": pin, "firma": ruta_firma}
+    guardar_ingenieros(db_ing)
+
+    context.user_data["ingeniero"] = nombre
+    context.user_data["firma_custom"] = ruta_firma
+
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
     markup = ReplyKeyboardMarkup([[fecha_hoy], ["Ingresar otra fecha"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("✅ Firma recibida. 📅 Confirme la fecha:", reply_markup=markup)
+    await update.message.reply_text(f"✅ Ingeniero {nombre} registrado con su firma y PIN.\n📅 Confirme la fecha del reporte:", reply_markup=markup)
     return FECHA
 
+# ==============================================================================
+# FECHA, CLIENTE Y GENERACIÓN DEL DOCUMENTO
+# ==============================================================================
 async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text.strip()
     if txt == "Ingresar otra fecha":
@@ -690,13 +851,7 @@ def construir_docx_individual(plantilla, udata, serie_actual):
                 p_cli.add_run().add_picture(firma_cliente_archivo, width=Inches(1.1))
                 break
 
-    archivo_firma = udata.get("firma_custom")
-    if not archivo_firma:
-        for f_nom in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
-            if os.path.exists(f_nom):
-                archivo_firma = f_nom
-                break
-
+    archivo_firma = udata.get("firma_custom") or buscar_firma_default()
     if archivo_firma and os.path.exists(archivo_firma):
         for r in t_firmas.rows:
             if any("engineer signature" in c.text.lower() or "firma" in c.text.lower() for c in r.cells):
@@ -766,6 +921,14 @@ def main():
 
     app = ApplicationBuilder().token(token).build()
 
+    conv_pin = ConversationHandler(
+        entry_points=[CommandHandler("pin", iniciar_config_pin)],
+        states={
+            CMD_PIN_NUEVO: [MessageHandler(filters.TEXT & ~filters.COMMAND, guardar_pin_jesus_cmd)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
     conv = ConversationHandler(
         entry_points=[CommandHandler("reporte", iniciar_reporte)],
         states={
@@ -790,8 +953,12 @@ def main():
             REP_CANT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_rep_cant)],
             REP_OBS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_rep_obs)],
             SATISFACCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_satisfaccion)],
-            CONFIRMAR_INGENIERO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_confirmar_ingeniero)],
-            SUBIR_FIRMA: [MessageHandler(filters.PHOTO, get_foto_firma)],
+            SELECCION_INGENIERO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_seleccion_ingeniero)],
+            VALIDAR_PIN_ING: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_validar_pin_ing)],
+            REGISTRAR_PIN_JESUS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_registrar_pin_jesus)],
+            REG_ING_NOMBRE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_reg_ing_nombre)],
+            REG_ING_FIRMA: [MessageHandler(filters.PHOTO, get_reg_ing_firma)],
+            REG_ING_PIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_reg_ing_pin)],
             FECHA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fecha)],
             CUSTOMER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_customer_name)],
             FIRMA_CLIENTE: [
@@ -803,6 +970,7 @@ def main():
     )
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(conv_pin)
     app.add_handler(conv)
 
     logger.info("Bot de Reportes listo.")
