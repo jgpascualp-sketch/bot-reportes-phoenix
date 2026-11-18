@@ -39,24 +39,71 @@ def iniciar_servidor_web():
     HTTPServer(("0.0.0.0", puerto), HealthHandler).serve_forever()
 
 # ==============================================================================
-# AGENDA DE CLÍNICAS BASE
+# BASE DE DATOS DE CLÍNICAS (12 Clínicas extraídas de tu CRM - Sin Innova)
 # ==============================================================================
 CLINICAS_BASE = {
-    "CLINICA DEL RIÑON SAN CAMILO S.A.C.": {
+    "CLINICA DEL RIÑON SAN CAMILLE SAC": {
         "contacto": "YURIKO MENDOZA ZAVALETA",
-        "telefono": "944274611",
-        "direccion": "URB. BUENOS AIRES MZ. 'E' LT. '28' NUEVO CHIMBOTE"
+        "telefono": "964274611",
+        "direccion": "URB BUENOS AIRES MZA. E LOTE. 2B NUEVO CHIMBOTE"
     },
-    "CLINICA INNOVA RENAL CENTER S.A.C.": {
-        "contacto": "ADMINISTRACION / BIOMEDICA",
-        "telefono": "",
-        "direccion": "TRUJILLO, LA LIBERTAD"
+    "CLÍNICA INTERDIAL NORTE SAC": {
+        "contacto": "TEC SANTIAGO",
+        "telefono": "930371479",
+        "direccion": "C. C LOTE 38, INDEPENDENCIA 15311"
+    },
+    "CENTRO RENAL HABICH SAC": {
+        "contacto": "MANUEL UBILLOS OLIVARES",
+        "telefono": "945317263",
+        "direccion": "AUXILIAR PANAMERICANA NORTE 2722"
+    },
+    "CLÍNICA DEL RIÑÓN SAN RENATO SAC": {
+        "contacto": "JOSUE JULIO VEGA JARA",
+        "telefono": "921401405",
+        "direccion": "SHIMPY PALTAY S/N TARICA HUARAZ"
+    },
+    "HEALTH AND SAFETY OCCUPATIONAL S.A.C.": {
+        "contacto": "TEC ELVIS",
+        "telefono": "960138133",
+        "direccion": "JR AREQUIPA 655 ANCASH"
+    },
+    "HEMODIAL CENTER SAC": {
+        "contacto": "SR. VLADIMIR",
+        "telefono": "996399989",
+        "direccion": "AV. PROCERES DE LA INDEPENDENCIA 2675, SAN JUAN DE LURIGANCHO 15419"
+    },
+    "CENTRO DE HEMODIÁLISIS COMAS SAC": {
+        "contacto": "SRTA. JANE DEYRA",
+        "telefono": "940267063",
+        "direccion": "PASAJE 49 MZ D LT.10 URB. EL RETABLO 2DA ETAPA, COMAS"
+    },
+    "C.D. NUESTRA SEÑORA DEL CARMEN EIRL.": {
+        "contacto": "SR. OCHOA",
+        "telefono": "902290710",
+        "direccion": "JIRON O'HIGGINS N° 130, SAN VICENTE DE CAÑETE, DEPARTAMENTO DE LIMA."
+    },
+    "CLÍNICA DE DIÁLISIS LAJA SUCURSAL NACIMIENTO": {
+        "contacto": "SR. MARCO GONZALEZ",
+        "telefono": "56997225822",
+        "direccion": "AV. JULIO HEMMELMANN 1751, NACIMIENTO, BIO BIO, CHILE"
+    },
+    "CENTRO DE DIÁLISIS RENGODIAL": {
+        "contacto": "SR. BERNARDO VALENZUELA",
+        "telefono": "56944281346",
+        "direccion": "CALLE RENGO N° 1761, RENGO, REGION DE O'HIGGINS, CHILE."
+    },
+    "CENTRO DE HEMODIÁLISIS CHIMBOTE SAC": {
+        "contacto": "TEC. ERICK",
+        "telefono": "933559879",
+        "direccion": "AV. ENRIQUE MEIGGS N° 1601 ANCASH - SANTA - CHIMBOTE"
+    },
+    "CENTRO DE DIÁLISIS NEFROCONTINENTE SAC": {
+        "contacto": "SRTA. ELVA",
+        "telefono": "94158967",
+        "direccion": "AV. MEXICO N° 685 - COMAS"
     }
 }
 
-# ==============================================================================
-# OPCIONES DE PREVENTIVO (Se copian en Detalles y en Solución)
-# ==============================================================================
 OPCIONES_PM = {
     "Primer mantenimiento preventivo de los 6 meses": "PRIMER MANTENIMIENTO PREVENTIVO DE LOS 6 MESES",
     "Segundo mantenimiento preventivo de los 12 meses": "SEGUNDO MANTENIMIENTO PREVENTIVO DE LOS 12 MESES"
@@ -106,9 +153,9 @@ async def iniciar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["consecutivo"] = ""
 
     botones = [[nombre] for nombre in clinicas_mem.keys()]
-    botones.append(["➕ Nueva Clínica (Escribir manual)"])
+    botones.append(["➕ Nuevo"])
     markup = ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("🏥 Seleccione la Clínica o pulse '➕ Nueva Clínica':", reply_markup=markup)
+    await update.message.reply_text("🏥 Seleccione la Clínica de la lista o pulse '➕ Nuevo':", reply_markup=markup)
     return SELECCION_CLINICA
 
 async def get_seleccion_clinica(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -124,7 +171,9 @@ async def get_seleccion_clinica(update: Update, context: ContextTypes.DEFAULT_TY
         
         await update.message.reply_text(
             f"✅ {context.user_data['hospital']}\n"
-            f"👤 Contacto: {context.user_data['contacto']}",
+            f"👤 Contacto: {context.user_data['contacto']}\n"
+            f"📞 Teléfono: {context.user_data['telefono']}\n"
+            f"📍 Dirección: {context.user_data['direccion']}",
             reply_markup=ReplyKeyboardRemove()
         )
         markup = ReplyKeyboardMarkup([["DORA-6000"], ["Otro"]], one_time_keyboard=True, resize_keyboard=True)
