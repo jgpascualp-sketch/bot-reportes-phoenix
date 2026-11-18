@@ -133,7 +133,6 @@ ITEMS_CHECKLIST = [
     "Calibración de Presión (Pressure calibration)", "Otros (Other)"
 ]
 
-# Persistencia local de ingenieros y PINs
 ARCHIVO_INGENIEROS = "ingenieros_db.json"
 
 def buscar_firma_default():
@@ -165,9 +164,15 @@ def guardar_ingenieros(db):
     except Exception as e:
         logger.error(f"Error guardando ingenieros: {e}")
 
+async def borrar_mensaje_secreto(update: Update):
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
 (
     SELECCION_CLINICA, HOSPITAL, CONTACTO, TELEFONO, DIRECCION,
-    MODELO, TIPO_SERVICIO_MENU, PM_TIPO, PM_MODO_LOTE, SERIES_LOTE,
+    MODELO, TIPO_SERVICIO_MENU, PM_TIPO, MODO_ALCANCE_MAQUINAS, SERIES_LOTE,
     SERIE, HOROMETRO, VERSION_SW, DETALLES, FALLA_TIPO, SOLUCION,
     CHECKLIST_MENU, REP_PARTE, REP_CANT, REP_OBS, SATISFACCION,
     SELECCION_INGENIERO, VALIDAR_PIN_ING, REGISTRAR_PIN_JESUS,
@@ -179,23 +184,25 @@ def guardar_ingenieros(db):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Comandos disponibles:\n"
-        "• /reporte - Generar reporte técnico (individual o lote ZIP)\n"
-        "• /pin - Registrar o cambiar el PIN de Jesús Pascual\n"
+        "• /reporte - Generar reporte técnico (1 equipo o todas las máquinas en ZIP)\n"
+        "• /pin - Registrar o cambiar el PIN secreto de Jesús Pascual\n"
         "• /cancel - Cancelar operación actual"
     )
 
-# Comando independiente /pin para que Jesús registre o cambie su PIN cuando quiera
+# Comando /pin con borrado automático del mensaje para mantenerlo secreto
 async def iniciar_config_pin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🔐 Ingrese el nuevo PIN numérico (ej. 1234) para firmar como JESÚS PASCUAL:",
+        "🔐 Ingrese el nuevo PIN secreto (mínimo 4 dígitos) para firmar como JESÚS PASCUAL\n"
+        "*(Se borrará de la pantalla automáticamente apenas lo envíes)*:",
         reply_markup=ReplyKeyboardRemove()
     )
     return CMD_PIN_NUEVO
 
 async def guardar_pin_jesus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pin = update.message.text.strip()
+    await borrar_mensaje_secreto(update)
     if len(pin) < 4:
-        await update.message.reply_text("⚠️ El PIN debe tener al menos 4 dígitos. Escríbalo nuevamente:")
+        await update.effective_chat.send_message("⚠️ El PIN debe tener al menos 4 dígitos. Escríbalo nuevamente:")
         return CMD_PIN_NUEVO
     db = cargar_ingenieros()
     db["JESUS GUILLERMO PASCUAL CHALAN"] = {
@@ -203,7 +210,7 @@ async def guardar_pin_jesus_cmd(update: Update, context: ContextTypes.DEFAULT_TY
         "firma": buscar_firma_default()
     }
     guardar_ingenieros(db)
-    await update.message.reply_text("✅ PIN de JESÚS PASCUAL registrado correctamente. Ya puedes usar /reporte.")
+    await update.effective_chat.send_message("🔒 PIN secreto de JESÚS PASCUAL guardado y ocultado. Ya puedes usar /reporte.")
     return ConversationHandler.END
 
 async def iniciar_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -286,6 +293,13 @@ async def get_modelo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🛠️ Tipo de Servicio (marque uno o varios):", reply_markup=markup)
     return TIPO_SERVICIO_MENU
 
+def preguntar_alcance_maquinas_markup():
+    return ReplyKeyboardMarkup(
+        [["📄 1 solo equipo"], ["📦 Se realizará a todas las máquinas (Lote ZIP)"]],
+        one_time_keyboard=True,
+        resize_keyboard=True
+    )
+
 async def tipo_servicio_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -301,8 +315,11 @@ async def tipo_servicio_callback(update: Update, context: ContextTypes.DEFAULT_T
             return PM_TIPO
             
         context.user_data["pm_auto"] = False
-        await query.message.reply_text("🔢 Ingrese Serial No.:", reply_markup=ReplyKeyboardRemove())
-        return SERIE
+        await query.message.reply_text(
+            "¿Este servicio se realizará a 1 equipo o a todas las máquinas?",
+            reply_markup=preguntar_alcance_maquinas_markup()
+        )
+        return MODO_ALCANCE_MAQUINAS
 
     clave = data.replace("srv_", "")
     if clave in sel:
@@ -323,22 +340,24 @@ async def get_pm_tipo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["falla_tipo"] = "Ninguno / Normal"
         context.user_data["checklist_seleccionados"] = list(ITEMS_CHECKLIST)
         
-        markup = ReplyKeyboardMarkup([["📄 1 solo equipo"], ["📦 Varios equipos (Lote ZIP)"]], one_time_keyboard=True, resize_keyboard=True)
         await update.message.reply_text(
-            f"✅ Configurado: {texto_pm}\n¿Para cuántos equipos generará reporte?",
-            reply_markup=markup
+            f"✅ Configurado: {texto_pm}\n¿Este servicio se realizará a 1 equipo o a todas las máquinas?",
+            reply_markup=preguntar_alcance_maquinas_markup()
         )
-        return PM_MODO_LOTE
+        return MODO_ALCANCE_MAQUINAS
 
     context.user_data["pm_auto"] = False
-    await update.message.reply_text("🔢 Ingrese Serial No.:", reply_markup=ReplyKeyboardRemove())
-    return SERIE
+    await update.message.reply_text(
+        "¿Este servicio se realizará a 1 equipo o a todas las máquinas?",
+        reply_markup=preguntar_alcance_maquinas_markup()
+    )
+    return MODO_ALCANCE_MAQUINAS
 
-async def get_pm_modo_lote(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def get_modo_alcance_maquinas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text.strip()
-    if "Lote ZIP" in txt:
+    if "todas las máquinas" in txt or "Lote ZIP" in txt:
         await update.message.reply_text(
-            "📦 Escriba o pegue los Números de Serie (uno por línea o separados por comas):",
+            "📦 Escriba o pegue los Números de Serie de todas las máquinas (uno por línea o separados por comas):",
             reply_markup=ReplyKeyboardRemove()
         )
         return SERIES_LOTE
@@ -364,8 +383,9 @@ async def get_series_lote(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return SERIES_LOTE
 
     context.user_data["series_lote"] = lista_series
-    await update.message.reply_text(f"✅ {len(lista_series)} equipos listos para ZIP.")
-    await update.message.reply_text("💻 Seleccione Versión de Software para el lote:", reply_markup=pedir_version_sw_markup())
+    context.user_data["horometro"] = ""
+    await update.message.reply_text(f"✅ {len(lista_series)} equipos registrados para generar en ZIP.")
+    await update.message.reply_text("💻 Seleccione Versión de Software para todas las máquinas:", reply_markup=pedir_version_sw_markup())
     return VERSION_SW
 
 async def get_serie(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -384,7 +404,6 @@ async def get_version_sw(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = update.message.text.strip()
     context.user_data["version_sw"] = "" if txt == "Dejar vacío" else txt.upper()
     
-    # Si es preventivo automático, salta directo a repuestos (porque detalles/solución/checklist ya están llenos)
     if context.user_data.get("pm_auto"):
         markup = ReplyKeyboardMarkup([["Sin repuestos / Continuar"]], one_time_keyboard=True, resize_keyboard=True)
         await update.message.reply_text("⚙️ ¿Se usó algún repuesto? (Escriba el nombre o pulse Continuar):", reply_markup=markup)
@@ -484,7 +503,7 @@ async def get_rep_obs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await ir_satisfaccion(update)
 
 # ==============================================================================
-# SELECCIÓN, REGISTRO Y VALIDACIÓN DE INGENIERO CON PIN
+# SELECCIÓN, REGISTRO Y VALIDACIÓN DE INGENIERO CON PIN SECRETO (AUTO-BORRADO)
 # ==============================================================================
 async def get_satisfaccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["satisfaccion"] = update.message.text.strip()
@@ -506,17 +525,17 @@ async def get_seleccion_ingeniero(update: Update, context: ContextTypes.DEFAULT_
         context.user_data["ing_seleccionado"] = txt
         datos_ing = db_ing[txt]
         
-        # Si es Jesús y aún no tiene PIN configurado, pedir que lo cree ahora
         if txt == "JESUS GUILLERMO PASCUAL CHALAN" and not datos_ing.get("pin"):
             await update.message.reply_text(
-                "🔐 Aún no has registrado tu PIN personal de Jesús.\n"
-                "Escríbelo ahora (mínimo 4 dígitos) para guardarlo y firmar:",
+                "🔐 Aún no has registrado tu PIN secreto de Jesús.\n"
+                "Escríbelo ahora (mínimo 4 dígitos) — *se borrará automáticamente al enviarlo*:",
                 reply_markup=ReplyKeyboardRemove()
             )
             return REGISTRAR_PIN_JESUS
 
         await update.message.reply_text(
-            f"🔐 Ingrese el PIN de seguridad de {txt} para autorizar su firma:",
+            f"🔐 Ingrese el PIN secreto de {txt}\n"
+            f"*(El mensaje con tu PIN se borrará automáticamente al enviarlo)*:",
             reply_markup=ReplyKeyboardRemove()
         )
         return VALIDAR_PIN_ING
@@ -526,8 +545,9 @@ async def get_seleccion_ingeniero(update: Update, context: ContextTypes.DEFAULT_
 
 async def get_registrar_pin_jesus(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pin = update.message.text.strip()
+    await borrar_mensaje_secreto(update)
     if len(pin) < 4:
-        await update.message.reply_text("⚠️ El PIN debe tener al menos 4 dígitos. Intente de nuevo:")
+        await update.effective_chat.send_message("⚠️ El PIN debe tener al menos 4 dígitos. Intente de nuevo:")
         return REGISTRAR_PIN_JESUS
 
     db_ing = cargar_ingenieros()
@@ -540,17 +560,18 @@ async def get_registrar_pin_jesus(update: Update, context: ContextTypes.DEFAULT_
 
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
     markup = ReplyKeyboardMarkup([[fecha_hoy], ["Ingresar otra fecha"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("✅ PIN registrado y firma estampada.\n📅 Confirme la fecha del reporte:", reply_markup=markup)
+    await update.effective_chat.send_message("🔒 PIN guardado (oculto por seguridad) y firma habilitada.\n📅 Confirme la fecha del reporte:", reply_markup=markup)
     return FECHA
 
 async def get_validar_pin_ing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pin_ingresado = update.message.text.strip()
+    await borrar_mensaje_secreto(update)
     ing_nombre = context.user_data.get("ing_seleccionado", "")
     db_ing = cargar_ingenieros()
     datos_ing = db_ing.get(ing_nombre, {})
 
     if pin_ingresado != datos_ing.get("pin"):
-        await update.message.reply_text("❌ PIN incorrecto. Intente nuevamente o envíe /cancel:")
+        await update.effective_chat.send_message("❌ PIN incorrecto (oculto). Intente nuevamente o envíe /cancel:")
         return VALIDAR_PIN_ING
 
     context.user_data["ingeniero"] = ing_nombre
@@ -558,10 +579,9 @@ async def get_validar_pin_ing(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
     markup = ReplyKeyboardMarkup([[fecha_hoy], ["Ingresar otra fecha"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text(f"✅ PIN correcto ({ing_nombre}).\n📅 Confirme la fecha del reporte:", reply_markup=markup)
+    await update.effective_chat.send_message(f"🔒 PIN validado (oculto) — Firma habilitada para {ing_nombre}.\n📅 Confirme la fecha del reporte:", reply_markup=markup)
     return FECHA
 
-# Flujo para registrar otro ingeniero nuevo
 async def get_reg_ing_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE):
     nombre = update.message.text.strip().upper()
     if not nombre:
@@ -578,13 +598,17 @@ async def get_reg_ing_firma(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ruta_firma = f"firma_{nombre_limpio}.png"
     await foto.download_to_drive(ruta_firma)
     context.user_data["nuevo_ing_firma"] = ruta_firma
-    await update.message.reply_text(f"🔐 Cree un PIN numérico (ej. 1234) para que {nombre} firme sus reportes:")
+    await update.message.reply_text(
+        f"🔐 Cree un PIN secreto (mínimo 4 dígitos) para {nombre}\n"
+        f"*(El mensaje con el PIN se borrará automáticamente al enviarlo)*:"
+    )
     return REG_ING_PIN
 
 async def get_reg_ing_pin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pin = update.message.text.strip()
+    await borrar_mensaje_secreto(update)
     if len(pin) < 4:
-        await update.message.reply_text("⚠️ El PIN debe tener al menos 4 dígitos. Escríbalo de nuevo:")
+        await update.effective_chat.send_message("⚠️ El PIN debe tener al menos 4 dígitos. Escríbalo de nuevo:")
         return REG_ING_PIN
 
     nombre = context.user_data["nuevo_ing_nombre"]
@@ -599,7 +623,7 @@ async def get_reg_ing_pin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     fecha_hoy = datetime.now().strftime("%d/%m/%Y")
     markup = ReplyKeyboardMarkup([[fecha_hoy], ["Ingresar otra fecha"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text(f"✅ Ingeniero {nombre} registrado con su firma y PIN.\n📅 Confirme la fecha del reporte:", reply_markup=markup)
+    await update.effective_chat.send_message(f"🔒 Ingeniero {nombre} registrado (PIN oculto) y firma habilitada.\n📅 Confirme la fecha del reporte:", reply_markup=markup)
     return FECHA
 
 # ==============================================================================
@@ -889,7 +913,7 @@ async def get_firma_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if series_lote:
             await update.message.reply_text(f"⏳ Generando {len(series_lote)} reportes en ZIP...", reply_markup=ReplyKeyboardRemove())
             archivos = [construir_docx_individual(plantilla, context.user_data, s) for s in series_lote]
-            nombre_zip = f"Lote_Preventivos_{datetime.now().strftime('%Y%m%d_%H%M')}.zip"
+            nombre_zip = f"Lote_Reportes_{datetime.now().strftime('%Y%m%d_%H%M')}.zip"
             with zipfile.ZipFile(nombre_zip, 'w') as zf:
                 for arch in archivos:
                     zf.write(arch)
@@ -940,7 +964,7 @@ def main():
             MODELO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_modelo)],
             TIPO_SERVICIO_MENU: [CallbackQueryHandler(tipo_servicio_callback)],
             PM_TIPO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_pm_tipo)],
-            PM_MODO_LOTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_pm_modo_lote)],
+            MODO_ALCANCE_MAQUINAS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_modo_alcance_maquinas)],
             SERIES_LOTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_series_lote)],
             SERIE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_serie)],
             HOROMETRO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_horometro)],
