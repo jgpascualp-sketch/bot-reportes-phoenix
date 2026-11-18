@@ -39,18 +39,68 @@ def iniciar_servidor_web():
     HTTPServer(("0.0.0.0", puerto), HealthHandler).serve_forever()
 
 # ==============================================================================
-# AGENDA DE CLÍNICAS BASE
+# BASE DE DATOS DE CLÍNICAS (Extraída de tu CRM)
 # ==============================================================================
 CLINICAS_BASE = {
-    "CLINICA DEL RIÑON SAN CAMILO S.A.C.": {
+    "CLINICA DEL RIÑON SAN CAMILLE SAC": {
         "contacto": "YURIKO MENDOZA ZAVALETA",
-        "telefono": "944274611",
-        "direccion": "URB. BUENOS AIRES MZ. 'E' LT. '28' NUEVO CHIMBOTE"
+        "telefono": "964274611",
+        "direccion": "URB BUENOS AIRES MZA. E LOTE. 2B NUEVO CHIMBOTE"
     },
-    "CLINICA INNOVA RENAL CENTER S.A.C.": {
-        "contacto": "ADMINISTRACION / BIOMEDICA",
-        "telefono": "",
-        "direccion": "TRUJILLO, LA LIBERTAD"
+    "CLÍNICA INTERDIAL NORTE SAC": {
+        "contacto": "TEC SANTIAGO",
+        "telefono": "930371479",
+        "direccion": "C. C LOTE 38, INDEPENDENCIA 15311"
+    },
+    "CENTRO RENAL HABICH SAC": {
+        "contacto": "MANUEL UBILLOS OLIVARES",
+        "telefono": "945317263",
+        "direccion": "AUXILIAR PANAMERICANA NORTE 2722"
+    },
+    "CLÍNICA DEL RIÑÓN SAN RENATO SAC": {
+        "contacto": "JOSUE JULIO VEGA JARA",
+        "telefono": "921401405",
+        "direccion": "SHIMPY PALTAY S/N TARICA HUARAZ"
+    },
+    "HEALTH AND SAFETY OCCUPATIONAL S.A.C.": {
+        "contacto": "TEC ELVIS",
+        "telefono": "960138133",
+        "direccion": "JR AREQUIPA 655 ANCASH"
+    },
+    "HEMODIAL CENTER SAC": {
+        "contacto": "SR. VLADIMIR",
+        "telefono": "996399989",
+        "direccion": "AV. PROCERES DE LA INDEPENDENCIA 2675, SAN JUAN DE LURIGANCHO 15419"
+    },
+    "CENTRO DE HEMODIÁLISIS COMAS SAC": {
+        "contacto": "SRTA. JANE DEYRA",
+        "telefono": "940267063",
+        "direccion": "PASAJE 49 MZ D LT.10 URB. EL RETABLO 2DA ETAPA, COMAS"
+    },
+    "C.D. NUESTRA SEÑORA DEL CARMEN EIRL.": {
+        "contacto": "SR. OCHOA",
+        "telefono": "902290710",
+        "direccion": "JIRON O'HIGGINS N° 130, SAN VICENTE DE CAÑETE, DEPARTAMENTO DE LIMA."
+    },
+    "CLÍNICA DE DIÁLISIS LAJA SUCURSAL NACIMIENTO": {
+        "contacto": "SR. MARCO GONZALEZ",
+        "telefono": "56997225822",
+        "direccion": "AV. JULIO HEMMELMANN 1751, NACIMIENTO, BIO BIO, CHILE"
+    },
+    "CENTRO DE DIÁLISIS RENGODIAL": {
+        "contacto": "SR. BERNARDO VALENZUELA",
+        "telefono": "56944281346",
+        "direccion": "CALLE RENGO N° 1761, RENGO, REGION DE O'HIGGINS, CHILE."
+    },
+    "CENTRO DE HEMODIÁLISIS CHIMBOTE SAC": {
+        "contacto": "TEC. ERICK",
+        "telefono": "933559879",
+        "direccion": "AV. ENRIQUE MEIGGS N° 1601 ANCASH - SANTA - CHIMBOTE"
+    },
+    "CENTRO DE DIÁLISIS NEFROCONTINENTE SAC": {
+        "contacto": "SRTA. ELVA",
+        "telefono": "94158967",
+        "direccion": "AV. MEXICO N° 685 - COMAS"
     }
 }
 
@@ -124,7 +174,9 @@ async def get_seleccion_clinica(update: Update, context: ContextTypes.DEFAULT_TY
         
         await update.message.reply_text(
             f"✅ {context.user_data['hospital']}\n"
-            f"👤 Contacto: {context.user_data['contacto']}",
+            f"👤 Contacto: {context.user_data['contacto']}\n"
+            f"📞 Teléfono: {context.user_data['telefono']}\n"
+            f"📍 Dirección: {context.user_data['direccion']}",
             reply_markup=ReplyKeyboardRemove()
         )
         markup = ReplyKeyboardMarkup([["DORA-6000"], ["Otro"]], one_time_keyboard=True, resize_keyboard=True)
@@ -207,557 +259,4 @@ async def get_pm_tipo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if txt in OPCIONES_PM:
         texto_pm = OPCIONES_PM[txt]
         context.user_data["pm_auto"] = True
-        context.user_data["detalles"] = texto_pm
-        context.user_data["solucion"] = texto_pm
-        context.user_data["falla_tipo"] = "Ninguno / Normal"
-        context.user_data["checklist_seleccionados"] = list(ITEMS_CHECKLIST)
-        context.user_data["version_sw"] = "020305"
-        
-        markup = ReplyKeyboardMarkup([["📄 1 solo equipo"], ["📦 Varios equipos (Lote ZIP)"]], one_time_keyboard=True, resize_keyboard=True)
-        await update.message.reply_text(
-            f"✅ Configurado: {texto_pm}\n¿Para cuántos equipos generará reporte?",
-            reply_markup=markup
-        )
-        return PM_MODO_LOTE
-
-    context.user_data["pm_auto"] = False
-    await update.message.reply_text("🔢 Ingrese Serial No.:", reply_markup=ReplyKeyboardRemove())
-    return SERIE
-
-async def get_pm_modo_lote(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text.strip()
-    if "Lote ZIP" in txt:
-        await update.message.reply_text(
-            "📦 Escriba o pegue los Números de Serie (uno por línea o separados por comas):",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return SERIES_LOTE
-
-    await update.message.reply_text("🔢 Ingrese Serial No.:", reply_markup=ReplyKeyboardRemove())
-    return SERIE
-
-async def get_series_lote(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    raw = update.message.text.strip().upper()
-    reemplazado = raw.replace(",", "\n").replace(";", "\n")
-    lista_series = [s.strip() for s in reemplazado.split("\n") if s.strip()]
-    
-    if not lista_series:
-        await update.message.reply_text("⚠️ No detecté series. Escríbalas nuevamente:")
-        return SERIES_LOTE
-
-    context.user_data["series_lote"] = lista_series
-    await update.message.reply_text(f"✅ {len(lista_series)} equipos listos para ZIP.")
-    
-    markup = ReplyKeyboardMarkup([["Sin repuestos / Continuar"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("⚙️ ¿Se usó algún repuesto? (Escriba el nombre o pulse Continuar):", reply_markup=markup)
-    return REP_PARTE
-
-async def get_serie(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["serie"] = update.message.text.strip().upper()
-    markup = ReplyKeyboardMarkup([["Dejar vacío"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("⏱️ Horómetro:", reply_markup=markup)
-    return HOROMETRO
-
-async def get_horometro(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text.strip()
-    context.user_data["horometro"] = "" if txt == "Dejar vacío" else txt.upper()
-    
-    if context.user_data.get("pm_auto"):
-        markup = ReplyKeyboardMarkup([["Sin repuestos / Continuar"]], one_time_keyboard=True, resize_keyboard=True)
-        await update.message.reply_text("⚙️ ¿Se usó algún repuesto? (Escriba el nombre o pulse Continuar):", reply_markup=markup)
-        return REP_PARTE
-
-    markup = ReplyKeyboardMarkup([["020305"], ["Dejar vacío"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("💻 Versión de Software:", reply_markup=markup)
-    return VERSION_SW
-
-async def get_version_sw(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text.strip()
-    context.user_data["version_sw"] = "" if txt == "Dejar vacío" else txt.upper()
-    await update.message.reply_text("📝 Detalles (Feedback Details):", reply_markup=ReplyKeyboardRemove())
-    return DETALLES
-
-async def get_detalles(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["detalles"] = update.message.text.strip().upper()
-    teclado = [
-        ["Ninguno / Normal"],
-        ["Fallo Hidaulico (Hydraulic fault)"], ["Fallo en el Circuito (Circuit fault)"],
-        ["Fallo en parte de sangre (Bloodparts fault)"], ["Fallo en Software (Software fault)"],
-        ["Fallo Mecanico (Mechanical fault)"], ["Fallo de montaje de pieza (Assemble fault)"],
-        ["Fallo de desgaste rápido de pieza (Quick-wear part)"], ["Otros Fallos (Others fault)"]
-    ]
-    markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("⚠️ Clasificación de Fallas:", reply_markup=markup)
-    return FALLA_TIPO
-
-async def get_falla_tipo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["falla_tipo"] = update.message.text.strip()
-    markup = ReplyKeyboardMarkup([["Dejar vacío"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("💡 Motivo del Fallo y Solución:", reply_markup=markup)
-    return SOLUCION
-
-def armar_teclado_checklist(seleccionados):
-    botones, fila = [], []
-    for item in ITEMS_CHECKLIST:
-        nombre_corto = item.split("(")[0].strip()
-        marca = "✔ " if item in seleccionados else "⬜ "
-        fila.append(InlineKeyboardButton(f"{marca}{nombre_corto}", callback_data=f"chk_{item}"))
-        if len(fila) == 2:
-            botones.append(fila)
-            fila = []
-    if fila:
-        botones.append(fila)
-    botones.append([InlineKeyboardButton("✨ SELECCIONAR TODO", callback_data="chk_ALL")])
-    botones.append([InlineKeyboardButton("✅ LISTO / CONTINUAR", callback_data="chk_DONE")])
-    return InlineKeyboardMarkup(botones)
-
-async def get_solucion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text.strip()
-    context.user_data["solucion"] = "" if txt == "Dejar vacío" else txt.upper()
-    markup = armar_teclado_checklist(context.user_data["checklist_seleccionados"])
-    await update.message.reply_text("📋 Lista de verificación:", reply_markup=markup)
-    return CHECKLIST_MENU
-
-async def checklist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    sel = context.user_data.get("checklist_seleccionados", [])
-    if data == "chk_DONE":
-        markup = ReplyKeyboardMarkup([["Sin repuestos / Continuar"]], one_time_keyboard=True, resize_keyboard=True)
-        await query.message.reply_text("⚙️ ¿Se usó algún repuesto? (Escriba el nombre o pulse Continuar):", reply_markup=markup)
-        return REP_PARTE
-    elif data == "chk_ALL":
-        context.user_data["checklist_seleccionados"] = list(ITEMS_CHECKLIST)
-    else:
-        item = data.replace("chk_", "")
-        if item in sel:
-            sel.remove(item)
-        else:
-            sel.append(item)
-        context.user_data["checklist_seleccionados"] = sel
-    await query.edit_message_reply_markup(reply_markup=armar_teclado_checklist(context.user_data["checklist_seleccionados"]))
-    return CHECKLIST_MENU
-
-async def ir_satisfaccion(update):
-    teclado = [["Satisfecho (Satisfied)"], ["Relativamente satisfecho"], ["Normal (Normal)"], ["Insatisfecho (Dissatisfied)"], ["Muy Insatisfecho (Very Dissatisfied)"]]
-    markup = ReplyKeyboardMarkup(teclado, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("⭐ Satisfacción del cliente:", reply_markup=markup)
-    return SATISFACCION
-
-async def get_rep_parte(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text.strip()
-    if txt in ["Sin repuestos / Continuar", "Omitir / Todo Vacío", "Dejar vacío"]:
-        context.user_data["rep_parte"], context.user_data["rep_cant"], context.user_data["rep_obs"] = "", "", ""
-        return await ir_satisfaccion(update)
-    context.user_data["rep_parte"] = txt.upper()
-    markup = ReplyKeyboardMarkup([["1"], ["Dejar vacío"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("⚙️ Cantidad:", reply_markup=markup)
-    return REP_CANT
-
-async def get_rep_cant(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text.strip()
-    context.user_data["rep_cant"] = "" if txt == "Dejar vacío" else txt.upper()
-    markup = ReplyKeyboardMarkup([["Dejar vacío"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("⚙️ Observación del repuesto:", reply_markup=markup)
-    return REP_OBS
-
-async def get_rep_obs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text.strip()
-    context.user_data["rep_obs"] = "" if txt == "Dejar vacío" else txt.upper()
-    return await ir_satisfaccion(update)
-
-async def get_satisfaccion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["satisfaccion"] = update.message.text.strip()
-    markup = ReplyKeyboardMarkup([["✅ Jesús Pascual + Firma Automática"], ["📷 Subir otra firma"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("👷 Firma del Ingeniero:", reply_markup=markup)
-    return CONFIRMAR_INGENIERO
-
-async def get_confirmar_ingeniero(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text.strip()
-    context.user_data["ingeniero"] = "JESUS GUILLERMO PASCUAL CHALAN"
-    if "Subir otra" in txt:
-        await update.message.reply_text("📸 Envíe la FOTO de la firma:", reply_markup=ReplyKeyboardRemove())
-        return SUBIR_FIRMA
-    context.user_data["firma_custom"] = None
-    fecha_hoy = datetime.now().strftime("%d/%m/%Y")
-    markup = ReplyKeyboardMarkup([[fecha_hoy], ["Ingresar otra fecha"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("📅 Fecha del reporte:", reply_markup=markup)
-    return FECHA
-
-async def get_foto_firma(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    foto = await update.message.photo[-1].get_file()
-    ruta_temp = "firma_subida.png"
-    await foto.download_to_drive(ruta_temp)
-    context.user_data["firma_custom"] = ruta_temp
-    fecha_hoy = datetime.now().strftime("%d/%m/%Y")
-    markup = ReplyKeyboardMarkup([[fecha_hoy], ["Ingresar otra fecha"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("✅ Firma recibida. 📅 Confirme la fecha:", reply_markup=markup)
-    return FECHA
-
-async def get_fecha(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text.strip()
-    if txt == "Ingresar otra fecha":
-        await update.message.reply_text("Escriba la fecha (ej: 17/11/2026):", reply_markup=ReplyKeyboardRemove())
-        return FECHA
-    context.user_data["fecha"] = txt
-    cont = context.user_data.get("contacto", "")
-    botones = [[f"Sí, {cont}"], ["Dejar vacío"]] if cont else [["Dejar vacío"]]
-    markup = ReplyKeyboardMarkup(botones, one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("👤 Nombre en firma del cliente (Customer Name):", reply_markup=markup)
-    return CUSTOMER_NAME
-
-async def get_customer_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    txt = update.message.text.strip()
-    if txt.startswith("Sí, "):
-        context.user_data["customer_name"] = context.user_data.get("contacto", "")
-    elif txt == "Dejar vacío":
-        context.user_data["customer_name"] = ""
-    else:
-        context.user_data["customer_name"] = txt.upper()
-    markup = ReplyKeyboardMarkup([["Dejar vacío"]], one_time_keyboard=True, resize_keyboard=True)
-    await update.message.reply_text("✍️ Foto de firma del cliente (o pulse 'Dejar vacío' para generar ya):", reply_markup=markup)
-    return FIRMA_CLIENTE
-
-def escribir_con_espacio(celda, texto, negrita=False, tamano=8):
-    celda.text = ""
-    lineas = [l.strip() for l in texto.split("\n") if l.strip()]
-    if not lineas:
-        p = celda.paragraphs[0]
-        p.paragraph_format.space_before, p.paragraph_format.space_after, p.paragraph_format.line_spacing = Pt(1), Pt(1), 1.05
-        return
-    for idx, linea in enumerate(lineas):
-        p = celda.paragraphs[0] if idx == 0 else celda.add_paragraph()
-        p.paragraph_format.space_before, p.paragraph_format.space_after, p.paragraph_format.line_spacing = Pt(1), Pt(1), 1.05
-        run = p.add_run(f"  {linea}")
-        run.font.size = Pt(tamano)
-        if negrita: run.bold = True
-
-def eliminar_linea_vertical(celda_izq, celda_der):
-    tcPr_i = celda_izq._tc.get_or_add_tcPr()
-    tcPr_d = celda_der._tc.get_or_add_tcPr()
-    tcPr_i.append(parse_xml(f'<w:tcBorders {nsdecls("w")}><w:right w:val="nil"/></w:tcBorders>'))
-    tcPr_d.append(parse_xml(f'<w:tcBorders {nsdecls("w")}><w:left w:val="nil"/></w:tcBorders>'))
-
-def construir_docx_individual(plantilla, udata, serie_actual):
-    doc = docx.Document(plantilla)
-    hosp = udata.get("hospital", "")
-    contacto = udata.get("contacto", "")
-    customer_name = udata.get("customer_name", contacto)
-    firma_cliente_archivo = udata.get("firma_cliente")
-    telefono = udata.get("telefono", "")
-    direccion = udata.get("direccion", "")
-    modelo = udata.get("modelo", "")
-    horometro = udata.get("horometro", "")
-    version_sw = udata.get("version_sw", "")
-    detalles = udata.get("detalles", "")
-    solucion = udata.get("solucion", "")
-    tipos_serv_sel = udata.get("tipos_servicio_seleccionados", [])
-    falla_tipo = udata.get("falla_tipo", "")
-    rep_p, rep_c, rep_o = udata.get("rep_parte", ""), udata.get("rep_cant", ""), udata.get("rep_obs", "")
-    satisfaccion = udata.get("satisfaccion", "")
-    checklist_sel = udata.get("checklist_seleccionados", [])
-    ingeniero = udata.get("ingeniero", "JESUS GUILLERMO PASCUAL CHALAN")
-    fecha_reporte = udata.get("fecha", datetime.now().strftime("%d/%m/%Y"))
-
-    t = doc.tables[0]
-    for r in t.rows:
-        txt_fila = [c.text.strip().lower() for c in r.cells]
-        if any("hospital name" in x for x in txt_fila):
-            escribir_con_espacio(r.cells[1], hosp)
-        if any("contact" in x for x in txt_fila) and any("phone" in x for x in txt_fila):
-            escribir_con_espacio(r.cells[1], contacto)
-            escribir_con_espacio(r.cells[-1], telefono)
-        if any("adress" in x or "dirección" in x for x in txt_fila):
-            escribir_con_espacio(r.cells[1], direccion)
-        if any("model" in x for x in txt_fila) and any("version" in x for x in txt_fila):
-            escribir_con_espacio(r.cells[1], modelo)
-            escribir_con_espacio(r.cells[-1], version_sw)
-        if any("serial no" in x for x in txt_fila):
-            escribir_con_espacio(r.cells[1], serie_actual)
-        if any("running" in x or "horometro" in x for x in txt_fila):
-            escribir_con_espacio(r.cells[1], horometro)
-        if any("feedback details" in x or "detalles" in x for x in txt_fila):
-            r.cells[0].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            r.cells[0].text = ""
-            p_det = r.cells[0].paragraphs[0]
-            p_det.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            p_det.paragraph_format.space_before, p_det.paragraph_format.space_after = Pt(0), Pt(0)
-            p_det.add_run("Detalles\n(Feedback Details)").font.size = Pt(8.5)
-            escribir_con_espacio(r.cells[-1], detalles, tamano=7.5)
-        if any("motivo del fallo" in x or "fault reason" in x for x in txt_fila):
-            tam_sol = 7.0 if len(solucion) > 250 else 7.5
-            escribir_con_espacio(r.cells[-1], solucion, tamano=tam_sol)
-
-    col1 = [("Mantenimiento Correctivo (Repair)", "correctivo"), ("Diagnostico (Diagnostic / Inspection)", "diagnostico"), ("Instalación (Installation)", "instal"), ("Desinstalación (Uninstallation)", "desinstal")]
-    col2 = [("Mantenimiento Preventivo (PM)", "preventivo"), ("Entrenamiento (Operation training)", "entrenamiento"), ("Seguimiento Tratamiento (Follow-up Trearment)", "seguimiento"), ("Otro (Other)", "otro")]
-
-    for r in t.rows:
-        if any("service type" in c.text.lower() or "tipo de servicio" in c.text.lower() for c in r.cells):
-            c_izq = r.cells[0] if len(r.cells) == 2 else r.cells[1]
-            c_der = r.cells[-1]
-            eliminar_linea_vertical(c_izq, c_der)
-            c_izq.text = ""
-            p_t = c_izq.paragraphs[0]
-            p_t.paragraph_format.space_before, p_t.paragraph_format.space_after = Pt(0), Pt(2)
-            r_tit = p_t.add_run("Tipo de Servicio (Service Type)\n")
-            r_tit.font.size, r_tit.bold = Pt(8.5), True
-            for op, clave in col1:
-                p = c_izq.add_paragraph()
-                p.paragraph_format.space_before, p.paragraph_format.space_after, p.paragraph_format.line_spacing = Pt(0), Pt(0), 1.0
-                sel = clave in tipos_serv_sel
-                run = p.add_run(f"  {op}  {'[ X ]' if sel else '[   ]'}")
-                run.font.size = Pt(7.5)
-                if sel: run.bold = True
-
-            c_der.text = ""
-            p_d_top = c_der.paragraphs[0]
-            p_d_top.paragraph_format.space_before, p_d_top.paragraph_format.space_after = Pt(0), Pt(2)
-            p_d_top.add_run("\n").font.size = Pt(8.5)
-            for op, clave in col2:
-                p = c_der.add_paragraph()
-                p.paragraph_format.space_before, p.paragraph_format.space_after, p.paragraph_format.line_spacing = Pt(0), Pt(0), 1.0
-                sel = clave in tipos_serv_sel
-                run = p.add_run(f"  {op}  {'[ X ]' if sel else '[   ]'}")
-                run.font.size = Pt(7.5)
-                if sel: run.bold = True
-            break
-
-    fallas_lista = [
-        ("Fallo Hidaulico\n(Hydraulic fault)", ["hidaulico", "hydraulic fault", "hidráulico", "hidraulico"]),
-        ("Fallo en el Circuito\n(Circuit fault)", ["circuito", "circuit fault"]),
-        ("Fallo en parte de sangre\n(Bloodparts fault)", ["sangre", "bloodparts fault"]),
-        ("Fallo en Software\n(Software fault)", ["software", "software fault"]),
-        ("Fallo Mecanico\n(Mechanical fault)", ["mecanico", "mechanical fault", "mecánico"]),
-        ("Fallo de montaje de pieza\n(Assemble fault)", ["montaje", "assemble fault"]),
-        ("Fallo de desgaste rápido de pieza\n(Quick-wear part)", ["desgaste", "quick-wear part"]),
-        ("Otros Fallos\n(Others fault)", ["otros fallos", "others fault"])
-    ]
-
-    for r in t.rows:
-        txt_r = " ".join([c.text.lower() for c in r.cells])
-        if any(k in txt_r for k in ["hidaulico", "hydraulic", "circuito", "mecanico", "sangre", "clasificación de fallas"]):
-            for c in r.cells:
-                txt_c = c.text.lower()
-                for nombre, patrones in fallas_lista:
-                    if any(p in txt_c for p in patrones):
-                        es_sel = (falla_tipo and any(p in falla_tipo.lower() for p in patrones) and falla_tipo != "Ninguno / Normal")
-                        c.text = ""
-                        p = c.paragraphs[0]
-                        p.paragraph_format.space_before, p.paragraph_format.space_after, p.paragraph_format.line_spacing = Pt(0), Pt(0), 1.0
-                        run = p.add_run(f"  {nombre}  {'[ X ]' if es_sel else '[   ]'}")
-                        run.font.size = Pt(7.5)
-                        if es_sel: run.bold = True
-                        break
-
-    checklist_map = [
-        ("Apariencia (Appearance check)", ["aparienc", "appearance"]), ("Bateria de respaldo (Backup battery)", ["bateri", "battery"]),
-        ("Placa Hall o Tarjeta electronica", ["placa", "hall", "pcb"]), ("Señal de sensor (Sensor signal)", ["señal", "signal"]),
-        ("Pantalla táctil (Touch screen)", ["pantalla", "touch"]), ("Pieza hidráulica (Hydraulic parts)", ["pieza hidráulica", "hydraulic parts", "pieza"]),
-        ("Parametros de Tratamiento", ["parametr", "treatment parameters"]), ("Sim. de Tratamiento (Simulation treatme)", ["sim.", "simulation"]),
-        ("Opciones (Options)", ["opcion", "options"]), ("Sensor de Cond. (Conductivity sensor)", ["sensor de cond", "conductivity sensor"]),
-        ("Bomba Ceramica (Ceramic pump)", ["bomba ceramica", "ceramic pump"]), ("Bomba de Heparina (Syringe pump)", ["bomba de heparina", "syringe pump", "heparina"]),
-        ("Calibración de Conductividad (Cond. Calibration)", ["conductiv", "cond. calib"]), ("Calibración de Temperatura (Temp. calibration)", ["temperat", "temp.calib"]),
-        ("Calibración de Presión (Pressure calibration)", ["presión", "presion", "pressure"]), ("Otros (Other)", ["otros", "other"])
-    ]
-
-    for r in t.rows:
-        txt_r = " ".join([c.text.lower() for c in r.cells])
-        if "motivo del fallo" in txt_r or "fault reason" in txt_r:
-            continue
-        if any(w in txt_r for w in ["apariencia", "pantalla", "opciones", "conductiv", "bomba", "calibración", "sensor", "verificación"]):
-            for c in r.cells:
-                txt_c = " ".join(c.text.lower().split())
-                for item_full, patrones in checklist_map:
-                    if any(p in txt_c for p in patrones):
-                        es_chk = item_full in checklist_sel
-                        c.text = ""
-                        p = c.paragraphs[0]
-                        p.paragraph_format.space_before, p.paragraph_format.space_after, p.paragraph_format.line_spacing = Pt(0), Pt(0), 1.0
-                        run = p.add_run(f"  {item_full}  {'[ ✔ ]' if es_chk else '[   ]'}")
-                        run.font.size = Pt(7.5)
-                        if es_chk: run.bold = True
-                        break
-
-    if rep_p or rep_c or rep_o:
-        idx_head = None
-        for i_r, r_obj in enumerate(t.rows):
-            txt_row = " ".join([c.text.lower() for c in r_obj.cells])
-            if "component name" in txt_row or "nombre de la parte" in txt_row:
-                idx_head = i_r
-                break
-        if idx_head is not None and idx_head + 1 < len(t.rows):
-            fila_datos = t.rows[idx_head + 1]
-            if len(fila_datos.cells) >= 4:
-                c_nombre, c_cant, c_obs = fila_datos.cells[2], (fila_datos.cells[3] if len(fila_datos.cells) > 3 else None), (fila_datos.cells[-1] if len(fila_datos.cells) > 4 else None)
-            else:
-                c_nombre, c_cant, c_obs = fila_datos.cells[1], (fila_datos.cells[2] if len(fila_datos.cells) > 2 else None), None
-            if rep_p and c_nombre: escribir_con_espacio(c_nombre, rep_p)
-            if rep_c and c_cant: escribir_con_espacio(c_cant, rep_c)
-            if rep_o and c_obs: escribir_con_espacio(c_obs, rep_o)
-
-    opciones_sat = ["Satisfecho (Satisfield)", "Relativamente satisfecho", "Normal (Normal)", "Insatisfecho (Dissatisfield)", "Muy Insatisfecho (Very Dissatisfield)"]
-    for r in t.rows:
-        if any("satisfaction" in c.text.lower() or "satisfacción" in c.text.lower() for c in r.cells):
-            c_sat = r.cells[-1]
-            c_sat.text = ""
-            p = c_sat.paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            p.paragraph_format.space_before, p.paragraph_format.space_after, p.paragraph_format.line_spacing = Pt(1), Pt(1), 1.0
-            p.add_run("Encuesta de satisfacción (Are you satisfield with the service):\n").font.size = Pt(8)
-            for sat_op in opciones_sat:
-                marca = "[ ✔ ]" if (satisfaccion and sat_op.split()[0].lower() in satisfaccion.lower()) else "[   ]"
-                run = p.add_run(f"{sat_op} {marca}    ")
-                run.font.size = Pt(8)
-                if marca == "[ ✔ ]": run.bold = True
-            break
-
-    for r in t.rows:
-        txt_row = " ".join([c.text.lower() for c in r.cells])
-        if "monto de dinero" in txt_row or "amount of money" in txt_row:
-            if len(r.cells) >= 2:
-                eliminar_linea_vertical(r.cells[0], r.cells[-1])
-            break
-
-    t_firmas = doc.tables[1] if len(doc.tables) > 1 else t
-    for r in t_firmas.rows:
-        txt_r = [c.text.lower() for c in r.cells]
-        if any("customer name" in x for x in txt_r) or any("nombre del cliente" in x for x in txt_r):
-            escribir_con_espacio(r.cells[1], customer_name)
-            escribir_con_espacio(r.cells[3], ingeniero)
-        if any("signature date" in x for x in txt_r) or any("fecha de firma" in x for x in txt_r):
-            escribir_con_espacio(r.cells[1], fecha_reporte)
-            escribir_con_espacio(r.cells[3], fecha_reporte)
-
-    if firma_cliente_archivo and os.path.exists(firma_cliente_archivo):
-        for r in t_firmas.rows:
-            if any("customer signature" in c.text.lower() or "firma" in c.text.lower() for c in r.cells):
-                cell_sig_cli = r.cells[1]
-                cell_sig_cli.text = ""
-                cell_sig_cli.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                p_cli = cell_sig_cli.paragraphs[0]
-                p_cli.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                p_cli.paragraph_format.space_before, p_cli.paragraph_format.space_after = Pt(0), Pt(0)
-                p_cli.add_run().add_picture(firma_cliente_archivo, width=Inches(1.1))
-                break
-
-    archivo_firma = udata.get("firma_custom")
-    if not archivo_firma:
-        for f_nom in ["Code_Generated_Image.png", "firma_transparente.png", "firma.png"]:
-            if os.path.exists(f_nom):
-                archivo_firma = f_nom
-                break
-
-    if archivo_firma and os.path.exists(archivo_firma):
-        for r in t_firmas.rows:
-            if any("engineer signature" in c.text.lower() or "firma" in c.text.lower() for c in r.cells):
-                cell_sig = r.cells[3]
-                cell_sig.text = ""
-                cell_sig.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-                p = cell_sig.paragraphs[0]
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                p.paragraph_format.space_before, p.paragraph_format.space_after = Pt(0), Pt(0)
-                p.add_run().add_picture(archivo_firma, width=Inches(1.1))
-                break
-
-    nombre_docx = f"Reporte_{serie_actual if serie_actual else 'Servicio'}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-    doc.save(nombre_docx)
-    return nombre_docx
-
-async def get_firma_cliente(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        if update.message.photo:
-            foto = await update.message.photo[-1].get_file()
-            ruta_temp = "firma_cliente_subida.png"
-            await foto.download_to_drive(ruta_temp)
-            context.user_data["firma_cliente"] = ruta_temp
-        else:
-            context.user_data["firma_cliente"] = None
-
-        plantilla = "1-TECHNICAL SERVICE REPORT corregido.docx"
-        if not os.path.exists(plantilla):
-            plantilla = "1-TECHNICAL SERVICE REPORT.docx"
-        if not os.path.exists(plantilla):
-            await update.message.reply_text("⚠️ No se encontró la plantilla en el repositorio.", reply_markup=ReplyKeyboardRemove())
-            return ConversationHandler.END
-
-        series_lote = context.user_data.get("series_lote", [])
-        if series_lote:
-            await update.message.reply_text(f"⏳ Generando {len(series_lote)} reportes en ZIP...", reply_markup=ReplyKeyboardRemove())
-            archivos = [construir_docx_individual(plantilla, context.user_data, s) for s in series_lote]
-            nombre_zip = f"Lote_Preventivos_{datetime.now().strftime('%Y%m%d_%H%M')}.zip"
-            with zipfile.ZipFile(nombre_zip, 'w') as zf:
-                for arch in archivos:
-                    zf.write(arch)
-            with open(nombre_zip, "rb") as f_zip:
-                await context.bot.send_document(chat_id=update.effective_chat.id, document=f_zip, caption=f"📦 Paquete ZIP con {len(archivos)} reportes listo.")
-        else:
-            serie = context.user_data.get("serie", "")
-            nombre_docx = construir_docx_individual(plantilla, context.user_data, serie)
-            with open(nombre_docx, "rb") as f:
-                await context.bot.send_document(chat_id=update.effective_chat.id, document=f, caption="📄 Reporte Técnico listo", reply_markup=ReplyKeyboardRemove())
-
-    except Exception as e:
-        logger.error(f"Error generando documento: {e}")
-        await update.message.reply_text(f"⚠️ Error generando el archivo: {e}", reply_markup=ReplyKeyboardRemove())
-
-    return ConversationHandler.END
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    await update.message.reply_text("❌ Cancelado.", reply_markup=ReplyKeyboardRemove())
-    return ConversationHandler.END
-
-def main():
-    threading.Thread(target=iniciar_servidor_web, daemon=True).start()
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    if not token:
-        logger.error("TELEGRAM_BOT_TOKEN no configurado")
-        sys.exit(1)
-
-    app = ApplicationBuilder().token(token).build()
-
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("reporte", iniciar_reporte)],
-        states={
-            SELECCION_CLINICA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_seleccion_clinica)],
-            HOSPITAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_hospital)],
-            CONTACTO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_contacto)],
-            TELEFONO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_telefono)],
-            DIRECCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_direccion)],
-            MODELO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_modelo)],
-            TIPO_SERVICIO_MENU: [CallbackQueryHandler(tipo_servicio_callback)],
-            PM_TIPO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_pm_tipo)],
-            PM_MODO_LOTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_pm_modo_lote)],
-            SERIES_LOTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_series_lote)],
-            SERIE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_serie)],
-            HOROMETRO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_horometro)],
-            VERSION_SW: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_version_sw)],
-            DETALLES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_detalles)],
-            FALLA_TIPO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_falla_tipo)],
-            SOLUCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_solucion)],
-            CHECKLIST_MENU: [CallbackQueryHandler(checklist_callback)],
-            REP_PARTE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_rep_parte)],
-            REP_CANT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_rep_cant)],
-            REP_OBS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_rep_obs)],
-            SATISFACCION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_satisfaccion)],
-            CONFIRMAR_INGENIERO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_confirmar_ingeniero)],
-            SUBIR_FIRMA: [MessageHandler(filters.PHOTO, get_foto_firma)],
-            FECHA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_fecha)],
-            CUSTOMER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_customer_name)],
-            FIRMA_CLIENTE: [
-                MessageHandler(filters.PHOTO, get_firma_cliente),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_firma_cliente)
-            ],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-    )
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(conv)
-
-    logger.info("Bot de Reportes listo.")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+        context.user_data["
